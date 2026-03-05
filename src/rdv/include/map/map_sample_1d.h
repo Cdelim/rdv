@@ -13,11 +13,7 @@ FORWARD {
     for(int i=0; i<OUTPUT_DIM; i++) _output[i] = 0.0;
     float coord = _input[0]*0.5 + 0.5;
     float grid_size = float(grid.shape[0]);
-    #ifdef ALIGN_CORNERS
-    float index_f = coord * (grid_size - 1.0);
-    #else
-    float index_f = coord * grid_size - 0.5;
-    #endif
+    float index_f = parameters.align_corners != 0 ? coord * (grid_size - 1.0) : coord * grid_size - 0.5;
     int index0 = int(floor(index_f));
     int index1 = index0 + 1;
     float alpha = index_f - float(index0);
@@ -49,11 +45,7 @@ BACKWARD {
 #endif
     float coord = _input[0]*0.5 + 0.5;
     float grid_size = float(grid.shape[0]);
-    #ifdef ALIGN_CORNERS
-    float index_f = coord * (grid_size - 1.0);
-    #else
-    float index_f = coord * grid_size - 0.5;
-    #endif
+    float index_f = parameters.align_corners != 0 ? coord * (grid_size - 1.0) : coord * grid_size - 0.5;
     int index0 = int(floor(index_f));
     int index1 = index0 + 1;
     float alpha = index_f - float(index0);

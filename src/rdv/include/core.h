@@ -24,7 +24,7 @@
 POINTER(float, 4)
 POINTER(int, 4)
 POINTER(uint, 4)
-POINTER(GPUPtr, 8)
+POINTER(GPUPtr, 4)
 POINTER(vec4, 4)
 POINTER(vec3, 4)
 POINTER(vec2, 4)
@@ -46,6 +46,31 @@ POINTER(uvec2, 4)
 
 /*
 ==================================
+              Debug
+==================================
+*/
+#define PRINT debugPrintfEXT
+#define ASSERT(cond, message) if (!(cond)) debugPrintfEXT(message);
+
+
+vec3 complexity_color(int value) {
+    vec3 colors [8] = vec3[] (
+        vec3(0.0, 0.0, 0.2),
+        vec3(0.0, 0.2, 0.4),
+        vec3(0.0, 0.4, 0.6),
+        vec3(0.0, 0.8, 0.2),
+        vec3(0.2, 0.8, 0.0),
+        vec3(0.4, 0.6, 0.0),
+        vec3(0.8, 0.2, 0.0),
+        vec3(1.0, 0.0, 0.0)
+    );
+    float alpha = log(float(value) + 1.0) / log(10000.0); // Assuming max value is around 1000 for normalization
+    alpha = clamp(alpha * 8.0, 0.0, 7.0); // Scale alpha to [0, 8) and clamp to valid index
+    return mix(colors[int(floor(alpha))], colors[int(ceil(alpha))], fract(alpha));
+}
+
+/*
+==================================
               MATH
 ==================================
 */
@@ -54,15 +79,13 @@ POINTER(uvec2, 4)
 #define inverseOfPi 0.31830988618379067153776752674503
 #define inverseOfTwoPi 0.15915494309189533576888376337251
 #define two_pi 6.283185307179586476925286766559
+#define POSINF uintBitsToFloat(0x7f800000u)
+#define NEGINF uintBitsToFloat(0xff800000u)
 
 
 bool intersect_ray_box(vec3 x, vec3 w, vec3 b_min, vec3 b_max, out float tMin, out float tMax)
 {
     // un-parallelize w
-    vec3 aw = abs(w);
-    w.x = aw.x <= 0.000001 ? 0.000001 : w.x;
-    w.y = aw.y <= 0.000001 ? 0.000001 : w.y;
-    w.z = aw.z <= 0.000001 ? 0.000001 : w.z;
     vec3 C_Min = (b_min - x)/w;
     vec3 C_Max = (b_max - x)/w;
 	tMin = max(max(min(C_Min[0], C_Max[0]), min(C_Min[1], C_Max[1])), min(C_Min[2], C_Max[2]));
@@ -76,17 +99,64 @@ bool intersect_ray_box(vec3 x, vec3 w, vec3 b_min, vec3 b_max, out float tMin, o
 
 void ray_box_intersection(vec3 x, vec3 w, vec3 b_min, vec3 b_max, out float tMin, out float tMax)
 {
-    // un-parallelize w
-    vec3 aw = abs(w);
-    w.x = aw.x <= 0.000001 ? 0.000001 : w.x;
-    w.y = aw.y <= 0.000001 ? 0.000001 : w.y;
-    w.z = aw.z <= 0.000001 ? 0.000001 : w.z;
     vec3 C_Min = (b_min - x)/w;
     vec3 C_Max = (b_max - x)/w;
-	tMin = max(max(min(C_Min[0], C_Max[0]), min(C_Min[1], C_Max[1])), min(C_Min[2], C_Max[2]));
-	tMax = min(min(max(C_Min[0], C_Max[0]), max(C_Min[1], C_Max[1])), max(C_Min[2], C_Max[2]));
+    vec3 c = min(C_Min, C_Max);
+	tMin = max(max(c.x, c.y), c.z);
+	c = max(C_Min, C_Max);
+	tMax = min(min(c.x, c.y), c.z);
 }
 
+void ray_box_intersection(vec3 x, vec3 w, out float tMin, out float tMax)
+{
+    vec3 inv_dist = 1.0 / w;
+    vec3 xc = -x * inv_dist;
+    vec3 s = abs(inv_dist);
+    vec3 c = xc-s;
+    tMin = max(max(c.x, c.y), c.z);
+    c = xc+s;
+    tMax = min(min(c.x, c.y),  c.z);
+}
+
+void segment_box_intersection(vec3 x0, vec3 x1, vec3 bmin, vec3 bmax, out float tMin, out float tMax)
+{
+    vec3 inv_dist = 1/(x1 - x0);
+    vec3 cmin = (bmin - x0)*inv_dist;
+    vec3 cmax = (bmax - x0)*inv_dist;
+    vec3 m = min(cmin, cmax);
+    vec3 M = max(cmin, cmax);
+    tMin = max(0.0, max(max(m.x, m.y), m.z));
+    tMax = min(1.0, min(min(M.x, M.y), M.z));
+}
+
+/*
+Segment intersection against axis-aligned box [-1,1]^3
+*/
+void segment_box_intersection(vec3 x0, vec3 x1, out float tMin, out float tMax)
+{
+    vec3 inv_dist = 1.0 / (x1 - x0);
+    vec3 x0_div_dist = x0 * inv_dist;
+    vec3 c = abs(inv_dist) - x0_div_dist;
+    tMin = max(0.0, max(max(-c.x, -c.y), -c.z));
+    tMax = min(1.0, min(min(c.x, c.y), c.z));
+}
+
+void ray_sphere_intersection(vec3 x, vec3 w, vec3 center, float radius, out float tMin, out float tMax)
+{
+    vec3 oc = x - center;
+    float a = dot(w, w);
+    float b = 2.0 * dot(oc, w);
+    float c = dot(oc, oc) - radius * radius;
+    float discriminant = b * b - 4.0 * a * c;
+    if (discriminant < 0.0) {
+        tMin = POSINF;
+        tMax = NEGINF;
+    } else {
+        float sqrt_disc = sqrt(discriminant);
+        tMin = (-b - sqrt_disc) / (2.0 * a);
+        tMax = (-b + sqrt_disc) / (2.0 * a);
+    }
+}
 
 // https://github.com/google/spherical-harmonics
 
@@ -192,7 +262,7 @@ void eval_sh_grad(vec3 w, float coef_grad[9], out vec3 dw)
     dw.y -= coef_grad[8] * _C24 * 2;
 }
 
-void eval_sh16(vec3 w, out float coef[16])
+void eval_sh(vec3 w, out float coef[16])
 {
     coef[0] = _C0;
     float x = w.x, y = w.y, z = w.z;
@@ -368,6 +438,14 @@ int pixel2morton(ivec2 px)
 ==================================
 */
 
+#ifdef RDV_STOCHASTIC_COMPUTE
+
+/*
+Random number generator is only compiled if RDV_STOCHASTIC_COMPUTE is defined.
+If a map requires randomness, the whole kernel is compiled with this flag.
+Specify map randomness requirements in the map __extension_info__ structure with stochastic=True.
+*/
+
 // adapted from NVidia
 // https://developer.nvidia.com/gpugems/gpugems3/part-vi-gpu-computing/chapter-37-efficient-random-number-generation-and-application
 uint TausStep(uint z, int S1, int S2, int S3, uint M) { uint b = (((z << S1) ^ z) >> S2); return ((z & M) << S3) ^ b; }
@@ -409,9 +487,10 @@ float random()
 
 uvec4 random_spawn(uvec4 rng_state, int index)
 {
-    uvec4 state = rng_state ^ uvec4(0x23F1 * index + index*(~index),0x3137,129,index + 129);
-    random_step(state);
-    return state;
+    rng_state = rng_state ^ uvec4(index ^ 17, index * 123111171, index + 11, index ^ (rng_state.x + 13 * rng_state.y));
+    // uvec4 state = rng_state ^ uvec4(0x23F1 * index + index*(~index),0x3137 % index, index ^ index, index + 129);
+    random_step(rng_state);
+    return rng_state;
 }
 
 uvec4 random_seed(uvec4 rng_state)
@@ -510,6 +589,23 @@ vec3 random_direction_HS_cosine_weighted(vec3 N, out float NdotD)
 	return vec3(0,0,0);
 }
 
+vec3 random_direction_HS_cosine_weighted()
+{
+	while (true) {
+		float x = random() * 2 - 1;
+		float y = random() * 2 - 1;
+		float d2 = x * x + y * y;
+		if (d2 > 0.001 && d2 < 1)
+		{
+			float z = sqrt(1 - d2);
+			return vec3(x, y, z);
+		}
+	}
+	return vec3(0,0,0);
+}
+
+
+
 vec2 rdv_BM() {
 	float u1 = 1.0 - random(); //uniform(0,1] random doubles
 	float u2 = 1.0 - random();
@@ -557,6 +653,8 @@ vec4 random_normal(vec4 mu, vec4 sd)
     return sd * random_normal_4() + mu;
 }
 
+#endif
+
 /*
 ==================================
               SUPPORT
@@ -586,86 +684,109 @@ float atomicAdd_f(float_ptr buf, int index, float value)
 */
 
 
-struct rdv_DeferredParameterInfo {
-    int name_id;
-    int number_of_indices; // indices required by the map.
-    int map_dim; // dimension required by the map
-    uint[4] indices; // should be
-};
-
-struct rdv_NamedTensorInfo {
-    GPUPtr data;  // data_ptr of the bound tensor
-    GPUPtr grad_data;  // data_ptr of the gradients of the bound tensor
-    int dim; // dimension of the whole tensor. (indices + map_used_dim) should be equals dim
-    uint[6] shape; // shape of the whole tensor
-};
-
-layout(set = 0, scalar, binding = 1, align=4) buffer DeferredParameterBuffer {
-    rdv_DeferredParameterInfo data[];
-} rdv_deferred_buffer;
-
-layout(set = 0, scalar, binding = 2, align=8) buffer NamedTensorsBuffer {
-    rdv_NamedTensorInfo data[];
-} rdv_named_buffer;
+layout(set = 0, scalar, binding = 1) uniform DeferredDataBuffer {
+    GPUPtr data[1024];
+    GPUPtr grad_data[1024];
+} rdv_deferred_data_buffer;
 
 
-struct DeferrableField
-{
-    GPUPtr data;
-    uint shape[6];
-    int deferred_index;
-};
-
-struct Tensor { GPUPtr data_ptr; GPUPtr grad_ptr; uint shape[6]; };
-Tensor load_deferred(in DeferrableField p) {
-    if (p.data != 0) {
-        Tensor t;
-        t.shape = p.shape;
-        t.data_ptr = p.data;
-        t.grad_ptr = 0;
-        return t;
-    }
-    else {
-        Tensor t = Tensor(0, 0, uint[6](0,0,0,0,0,0));
-        rdv_DeferredParameterInfo dinfo = rdv_deferred_buffer.data[p.deferred_index];
-        rdv_NamedTensorInfo ninfo = rdv_named_buffer.data[dinfo.name_id];
-        if (ninfo.data == 0)  // null tensor
-            return t;
-        uint map_tensor_size = 1;
-        for (int i=0; i < dinfo.map_dim; i++)
-        {
-            uint d = ninfo.shape[dinfo.number_of_indices + i];
-            map_tensor_size *= d;
-            t.shape[i] = d;
-        }
-        uint acc_batch_size = map_tensor_size;
-        uint offset = 0;
-        for (int i=dinfo.number_of_indices - 1; i >= 0; i++)
-        {
-            offset += acc_batch_size * dinfo.indices[i];
-            acc_batch_size *= ninfo.shape[i];
-        }
-        t.data_ptr = ninfo.data + offset;
-        t.grad_ptr = ninfo.grad_data == 0 ? 0 : ninfo.grad_data + offset;
-        return t;
-    }
+GPUPtr load_deferred_tensor(in GPUPtr t) {
+    uvec2 data = unpackUint2x32(t);
+    return rdv_deferred_data_buffer.data[data.x >> 1] + data.y; // data.y is the offset, data.x >> 1 is the index in the deferred buffer
 }
 
-#define DECLARE_INDEXING(dim) uint index_offset(uint shape[6], int index[dim]) { \
-    uint offset = 0; uint acc = 1; \
-    for (int i = dim - 1; i >= 0; i--) { \
-        offset += index[i] * acc; acc *= shape[i]; } \
-    return offset; }
 
-DECLARE_INDEXING(1)
+GPUPtr load_tensor(in GPUPtr t) {
+#ifdef RDV_HAS_DEFERRED
+    if (t % 2 == 0)  // even means it's a direct pointer, odd means it's a deferred tensor (pointer to the deferred buffer)
+        return t;
+    else
+    {
+        uvec2 data = unpackUint2x32(t);
+        return rdv_deferred_data_buffer.data[data.x >> 1] + data.y; // data.y is the offset, data.x >> 1 is the index in the deferred buffer
+    }
+#else
+    return t;
+#endif
+}
 
-DECLARE_INDEXING(2)
+GPUPtr load_tensor_grad(in GPUPtr t) {
+#ifdef RDV_HAS_DEFERRED
+    if (t % 2 == 0)  // even means it's a direct pointer, odd means it's a deferred tensor (pointer to the deferred buffer)
+        return t;
+    else
+    {
+        uvec2 data = unpackUint2x32(t);
+        return rdv_deferred_data_buffer.grad_data[data.x >> 1] + data.y; // data.y is the offset, data.x >> 1 is the index in the deferred buffer
+    }
+#else
+    return 0;
+#endif
+}
 
-DECLARE_INDEXING(3)
+//struct Tensor { GPUPtr data_ptr; GPUPtr grad_ptr; uint shape[5]; };
+//
+//Tensor load_deferred(in DeferrableField p) {
+//    if (p.deferred_index < 0) {
+//        Tensor t;
+//        t.shape = p.shape;
+//        t.data_ptr = p.data;
+//        t.grad_ptr = 0;
+//        return t;
+//    }
+//    else {
+//        Tensor t = Tensor(0, 0, uint[5](0,0,0,0,0));
+//        rdv_DeferredParameterInfo dinfo = rdv_deferred_buffer.data[p.deferred_index];
+//        rdv_NamedTensorInfo ninfo = rdv_named_buffer.data[dinfo.name_id];
+//        if (ninfo.data == 0)  // null tensor
+//            return t;
+////        PRINT("loaded not null deferred tensor index %d", p.deferred_index);
+//        uint map_tensor_size = 1;
+//        int b = dinfo.map_dim + dinfo.number_of_indices - ninfo.dim;  // values to pad
+//        for(int i=0; i < dinfo.map_dim; i++)
+//        {
+//            uint d = i < b ? 1: ninfo.shape[dinfo.number_of_indices + i - b];
+//            map_tensor_size *= d;
+//            t.shape[i] = d;
+//        }
+//        uint acc_batch_size = map_tensor_size;
+//        uint offset = 0;
+//        for(int i=dinfo.number_of_indices - 1; i >= 0; i++)
+//        {
+//            offset += acc_batch_size * dinfo.indices[i];
+//            acc_batch_size *= ninfo.shape[i];
+//        }
+//        t.data_ptr = ninfo.data + offset;
+//        t.grad_ptr = ninfo.grad_data == 0 ? 0 : ninfo.grad_data + offset;
+//        return t;
+//    }
+//}
 
-DECLARE_INDEXING(4)
+//#define DECLARE_INDEXING(dim) uint index_offset(uint shape[5], int index[dim]) {
+//    uint offset = 0; uint acc = 1;
+//    for (int i = dim - 1; i >= 0; i--) {
+//        offset += index[i] * acc; acc *= shape[i]; }
+//    return offset; }
+//
+//DECLARE_INDEXING(1)
+//
+//DECLARE_INDEXING(2)
+//
+//DECLARE_INDEXING(3)
+//
+//DECLARE_INDEXING(4)
+//
+//DECLARE_INDEXING(5)
+//
+//float_ptr tensor_at(in Tensor t, ivec3 index) {
+//    return float_ptr(t.data_ptr + index_offset(t.shape, int[](index.z, index.y, index.x)) * 4);
+//}
 
-DECLARE_INDEXING(5)
+float_ptr tensor_at(GPUPtr base_ptr, int dim, int shape[3], ivec3 p)
+{
+    int offset = ((p.z * shape[1] + p.y) * shape[2] + p.x) * 4 * dim;
+    return float_ptr(base_ptr + offset);
+}
 
 /*
 ==================================
@@ -673,7 +794,7 @@ DECLARE_INDEXING(5)
 ==================================
 */
 
-layout(buffer_reference, scalar, buffer_reference_align=8) buffer MeshInfo {
+layout(buffer_reference, scalar, buffer_reference_align=4) buffer MeshInfo {
     GPUPtr positions;
     GPUPtr normals;
     GPUPtr coordinates;
@@ -682,7 +803,7 @@ layout(buffer_reference, scalar, buffer_reference_align=8) buffer MeshInfo {
     GPUPtr indices;
 };
 
-layout(buffer_reference, scalar, buffer_reference_align=8) buffer RaycastableInfo {
+layout(buffer_reference, scalar, buffer_reference_align=4) buffer RaycastableInfo {
     GPUPtr callable_map;
     GPUPtr mesh_info;
 };
@@ -802,6 +923,28 @@ mat4x3 inverse_transform(mat4x3 T)
     return mat4x3(M);
 }
 
+void transform_ray_to_object(inout vec3 x, inout vec3 w, mat4x3 T)
+{
+    mat3 L = inverse(mat3(T[0].xyz, T[1].xyz, T[2].xyz));
+    vec3 t = T[3].xyz;
+    x = L * (x - t);
+    w = L * w;
+}
+
+void transform_ray_to_world(inout vec3 x, inout vec3 w, mat4x3 T)
+{
+    mat3 L = mat3(T[0].xyz, T[1].xyz, T[2].xyz);
+    vec3 t = T[3].xyz;
+    x = L * x + t;
+    w = L * w;
+}
+
+void transform_normal_to_world(inout vec3 N, mat4x3 T)
+{
+    mat3 L = mat3(T[0].xyz, T[1].xyz, T[2].xyz);
+    N = normalize(transpose(inverse(L)) * N);
+}
+
 Surfel sample_surfel(in MeshInfo mesh, int index, vec2 baricentrics)
 {
     vec3 alphas = vec3(1 - baricentrics.x - baricentrics.y, baricentrics.x, baricentrics.y);
@@ -838,6 +981,60 @@ Surfel sample_surfel(in MeshInfo mesh, int index, vec2 baricentrics)
     return Surfel(P, N, Nface, C, T, B);
 }
 
+#ifdef RDV_STOCHASTIC_COMPUTE
+
+vec3 hg_phase_sample(vec3 w_in, float g) {
+	float phi = random() * 2 * pi;
+    float xi = random();
+    float g2 = g * g;
+    float one_minus_g2 = 1.0 - g2;
+    float one_plus_g2 = 1.0 + g2;
+    float one_over_2g = 0.5 / g;
+
+	float t = one_minus_g2 / (1.0f - g + 2.0f * g * xi);
+	float invertcdf = one_over_2g * (one_plus_g2 - t * t);
+	float cosTheta = abs(g) < 0.001 ? 2 * xi - 1 : invertcdf;
+	float sinTheta = sqrt(max(0, 1.0f - cosTheta * cosTheta));
+	vec3 t0, t1;
+	create_ortho_basis(w_in, t0, t1);
+    return sinTheta * sin(phi) * t0 + sinTheta * cos(phi) * t1 + cosTheta * w_in;
+}
+
+vec3 hg_phase_sample(vec3 w_in, float g, out float pdf) {
+	float phi = random() * 2 * pi;
+    float xi = random();
+    float g2 = g * g;
+    float one_minus_g2 = 1.0 - g2;
+    float one_plus_g2 = 1.0 + g2;
+    float one_over_2g = 0.5 / g;
+
+	float t = one_minus_g2 / (1.0f - g + 2.0f * g * xi);
+	float invertcdf = one_over_2g * (one_plus_g2 - t * t);
+	float cosTheta = abs(g) < 0.001 ? 2 * xi - 1 : invertcdf;
+	float sinTheta = sqrt(max(0, 1.0f - cosTheta * cosTheta));
+	pdf = 0.25 / pi * (one_minus_g2) / pow(one_plus_g2 - 2 * g * cosTheta, 1.5);
+	vec3 t0, t1;
+	create_ortho_basis(w_in, t0, t1);
+    return sinTheta * sin(phi) * t0 + sinTheta * cos(phi) * t1 + cosTheta * w_in;
+}
+
+#endif
+
+float hg_phase_eval(float cos_theta, float g)
+{
+	if (abs(g) < 0.001)
+		return 0.25 / pi;
+    float g2 = g * g;
+    float one_minus_g2 = 1.0 - g2;
+    float one_plus_g2 = 1.0 + g2;
+	return 0.25 / pi * (one_minus_g2) / pow(one_plus_g2 - 2 * g * cos_theta, 1.5);
+}
+
+float hg_phase_eval(vec3 w_in, vec3 w_out, float g)
+{
+    return hg_phase_eval(dot(w_in, w_out), g);
+}
+
 
 /*
 ==================================
@@ -858,17 +1055,14 @@ Surfel sample_surfel(in MeshInfo mesh, int index, vec2 baricentrics)
 #define BUFFER(name) HELPER_BUFFER(name, RDV_CODENAME)
 #define BUFFER_DECL(name, size) layout(buffer_reference, scalar, buffer_reference_align=4) buffer BUFFER(name) { float data[size]; };
 
-//#define FORWARD void forward(MAP_DECL, in float _input[ARRAY_SIZE(INPUT_DIM)], out float _output[ARRAY_SIZE(OUTPUT_DIM)])
-//#define BACKWARD void backward(MAP_DECL, in float _input[ARRAY_SIZE(INPUT_DIM)], in float _output_grad[ARRAY_SIZE(OUTPUT_DIM)], inout float _input_grad[ARRAY_SIZE(INPUT_DIM)])
-//#define BACKWARD_OUTPUT void backward(MAP_DECL, in float _input[ARRAY_SIZE(INPUT_DIM)], in float _output[ARRAY_SIZE(OUTPUT_DIM)], in float _output_grad[ARRAY_SIZE(OUTPUT_DIM)], inout float _input_grad[ARRAY_SIZE(INPUT_DIM)])
+// used in signatures for automatic helper submap forward and backward shortcuts.
+#define SUBMAP_FORWARD_NAME SUBMAP_NAME
+#define BUILD_SUBMAP_NAME(name) CONCAT(name,_bw)
+#define SUBMAP_BACKWARD_NAME BUILD_SUBMAP_NAME(SUBMAP_NAME)
 
-/*
-==================================
-              Debug
-==================================
-*/
-#define PRINT debugPrintfEXT
-#define ASSERT(cond, message) if (!(cond)) debugPrintfEXT(message);
+
+#define CAST(map_type, map_ptr) map_type(MAP_BUFFER_NAME(map_type) (map_ptr))
+
 
 
 #endif

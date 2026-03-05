@@ -9,23 +9,18 @@ void scanline_interpolator(MAP_DECL, inout float dst[OUTPUT_DIM],
 }
 
 FORWARD {
-    Tensor grid = load_deferred(parameters.grid);
     for(int i=0; i<OUTPUT_DIM; i++) _output[i] = 0.0;
     vec2 coord = vec2(_input[0], _input[1])*0.5 + 0.5;
-    vec2 grid_size = vec2(float(grid.shape[1]), float(grid.shape[0]));
-    #ifdef ALIGN_CORNERS
-    vec2 index_f = coord * (grid_size - vec2(1.0));
-    #else
-    vec2 index_f = coord * grid_size - vec2(0.5);
-    #endif
+    vec2 grid_size = vec2(float(parameters.shape[1]), float(parameters.shape[0]));
+    vec2 index_f = parameters.align_corners != 0 ? coord * (grid_size - vec2(1.0)) : coord * grid_size - vec2(0.5);
     ivec2 index0 = ivec2(floor(index_f));
     ivec2 index1 = index0 + ivec2(1);
     vec2 alpha = index_f - vec2(index0);
     index0 = clamp(index0, ivec2(0), ivec2(grid_size) - ivec2(1));
     index1 = clamp(index1, ivec2(0), ivec2(grid_size) - ivec2(1));
     int stride_x = OUTPUT_DIM * 4;
-    int stride_y = int(grid.shape[1]) * stride_x;
-    GPUPtr ptr = grid.data_ptr + index0.x * stride_x + index0.y * stride_y;
+    int stride_y = int(parameters.shape[1]) * stride_x;
+    GPUPtr ptr = load_tensor(parameters.grid) + index0.x * stride_x + index0.y * stride_y;
     stride_x *= (index1.x - index0.x);
     scanline_interpolator(_this, _output,
         float_ptr(ptr),
@@ -48,27 +43,23 @@ in float _output_grad[OUTPUT_DIM], float x_weight, float y_weight) {
 }
 
 BACKWARD {
-    Tensor grid = load_deferred(parameters.grid);
+    GPUPtr ptr = load_tensor_grad(parameters.grid);
 #ifndef INPUT_REQUIRES_GRAD
-    if (grid.grad_ptr == 0) return;  // no gradient needed
+    if (ptr == 0) return;  // no gradient needed
 #else
     NOT_SUPPORTED("Input requires grad");
 #endif
     vec2 coord = vec2(_input[0], _input[1])*0.5 + 0.5;
-    vec2 grid_size = vec2(float(grid.shape[1]), float(grid.shape[0]));
-    #ifdef ALIGN_CORNERS
-    vec2 index_f = coord * (grid_size - vec2(1.0));
-    #else
-    vec2 index_f = coord * grid_size - vec2(0.5);
-    #endif
+    vec2 grid_size = vec2(float(parameters.shape[1]), float(parameters.shape[0]));
+    vec2 index_f = parameters.align_corners != 0 ? coord * (grid_size - vec2(1.0)) : coord * grid_size - vec2(0.5);
     ivec2 index0 = ivec2(floor(index_f));
     ivec2 index1 = index0 + ivec2(1);
     vec2 alpha = index_f - vec2(index0);
     index0 = clamp(index0, ivec2(0), ivec2(grid_size) - ivec2(1));
     index1 = clamp(index1, ivec2(0), ivec2(grid_size) - ivec2(1));
     int stride_x = OUTPUT_DIM * 4;
-    int stride_y = int(grid.shape[1]) * stride_x;
-    GPUPtr ptr = grid.grad_ptr + index0.x * stride_x + index0.y * stride_y;
+    int stride_y = int(parameters.shape[1]) * stride_x;
+    ptr += index0.x * stride_x + index0.y * stride_y;
     stride_x *= (index1.x - index0.x);
     scanline_interpolator_bw(_this,
         float_ptr(ptr),
