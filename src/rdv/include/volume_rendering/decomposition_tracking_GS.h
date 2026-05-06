@@ -9,7 +9,7 @@ parameters:
 */
 
 FORWARD {
-
+    // 1. MEMORY BINDINGS
     GPUPtr positions_ptr = load_tensor(parameters.positions);
     vec3_ptr positions = vec3_ptr(positions_ptr);
     GPUPtr colors_ptr = load_tensor(parameters.colors);
