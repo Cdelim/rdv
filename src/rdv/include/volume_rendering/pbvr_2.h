@@ -67,13 +67,13 @@ FORWARD {
     // notice, in this point wo is not normalized, but is not a problem since we will use it for traversing the unnormalized density field, and we will normalize it later for sampling the phase function
     float tMin, tMax;
     ray_box_intersection(x, wo, vec3(-1.0), vec3(1.0), tMin, tMax);
-    vec3 A = vec3(0.0);
+    vec3 out = vec3(0.0);
     if (tMax <= 0 || tMin > tMax) // ray points away from the volume
     {
 #ifdef ENVIRONMENT
         A += environment(_this, w); // direct environment lighting
 #endif
-        _output = float[3](A.x, A.y, A.z);
+        _output = float[3](out.x, out.y, out.z);
         return;
     }
     x += wo * tMin; // initial position in object space
@@ -137,6 +137,6 @@ FORWARD {
 #endif
     // _output = float[](A.x, A.y, A.z);
     //A = complexity_color(bounces);
-    _output = float[](A.x, A.y, A.z);
+    _output = float[](out.x, out.y, out.z);
 }
 
