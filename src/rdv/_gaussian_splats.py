@@ -71,6 +71,11 @@ class GS3D(_core.Map):
         self.vk_geometry_ads_info = None
         self.vk_ads_info = None
         self.ads = None
+        self.majorant_buffer = None
+        self.minorant_buffer = None
+        self.control_color_buffer = None
+        self.grid_min = None
+        self.grid_size = None
 
     def clone(self, **kwargs) -> 'Map':
         return GS3D(
