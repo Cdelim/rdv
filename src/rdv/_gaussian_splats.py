@@ -11,17 +11,11 @@ class GS3D(_core.Map):
             colors=_torch.Tensor,
             inv_covs=_torch.Tensor,
             opacities=_torch.Tensor,
-            majorant_buffer=_torch.Tensor,
-            minorant_buffer=_torch.Tensor,
-            control_color_buffer =_torch.Tensor,
-            grid_min=_torch.Tensor,
-            grid_size=_torch.Tensor,
             scales = _torch.Tensor
         ),
-        stochastic = True 
+        stochastic = True  # Keep this so your C++ random() works!
     )
 
-    # NEW: Updated signature to accept inv_covs and opacities
     def __init__(self, positions: _core.TensorLike | _core.deferred, 
                  colors:_core.TensorLike | _core.deferred, 
                  inv_covs:_core.TensorLike | _core.deferred, 
@@ -65,11 +59,6 @@ class GS3D(_core.Map):
         self.vk_geometry_ads_info = None
         self.vk_ads_info = None
         self.ads = None
-        self.majorant_buffer = None
-        self.minorant_buffer = None
-        self.control_color_buffer = None
-        self.grid_min = None
-        self.grid_size = None
 
     def clone(self, **kwargs) -> 'Map':
         return GS3D(
@@ -80,77 +69,6 @@ class GS3D(_core.Map):
             transform=self.transform,
             **kwargs
         )
-
-    
-    def _build_decomposition_grid(self, grid_resolution=64):
-        """Helper function to calculate both Majorant and Minorant grids"""
-        
-        # Majorant Calculation
-        voxel_grid = _torch.full((grid_resolution, grid_resolution, grid_resolution), 
-                                fill_value=0.1, dtype=_torch.float32, device=self.positions.device)
-
-        min_bounds = self.positions.min(dim=0)[0]
-        max_bounds = self.positions.max(dim=0)[0]
-        scene_size = max_bounds - min_bounds
-        
-        min_bounds -= scene_size * 0.01
-        max_bounds += scene_size * 0.01
-        scene_size = max_bounds - min_bounds
-
-        norm_positions = (self.positions - min_bounds) / scene_size
-        grid_indices = (norm_positions * (grid_resolution - 1)).long()
-
-        idx_x = grid_indices[:, 0]
-        idx_y = grid_indices[:, 1]
-        idx_z = grid_indices[:, 2]
-
-        peak_densities = self.opacities.squeeze() * 5.0
-
-        flat_indices = idx_x * (grid_resolution ** 2) + idx_y * grid_resolution + idx_z
-        flat_grid = voxel_grid.flatten()
-        flat_grid.scatter_reduce_(dim=0, index=flat_indices, src=peak_densities, reduce='amax', include_self=True)
-        
-        self.majorant_buffer = flat_grid.contiguous()
-        self.grid_min = min_bounds.contiguous()
-        self.grid_size = scene_size.contiguous()
-       
-
-        # Calculate Minorant Grid
-        # Improved Minorant Logic
-        # Initialize with a very high value so amin can actually find the lowest peak_density
-        voxel_min_grid = _torch.full((grid_resolution**3,), 1000.0, device=self.positions.device)
-
-        # Only scatter to voxels that actually have Gaussians
-        flat_min_grid = voxel_min_grid.scatter_reduce_(
-            dim=0, 
-            index=flat_indices, 
-            src=peak_densities, 
-            reduce='amin', 
-            include_self=False # Don't include the 1000.0 initial value
-        )
-
-        # Fill voxels that never received a value with 0.0
-        flat_min_grid[flat_min_grid == 1000.0] = 0.0
-
-        # Apply a conservative multiplier (e.g., 0.1) 
-        # The paper notes that underestimating is safe but overestimating causes bias
-        self.minorant_buffer = (flat_min_grid * 0.1).contiguous()
-
-
-        # Initialize a grid for RGB sums and a counter grid
-        color_sum_grid = _torch.zeros((grid_resolution**3, 3), device=self.positions.device)
-        count_grid = _torch.zeros((grid_resolution**3,), device=self.positions.device)
-
-        # Use scatter_add to sum up colors and counts per voxel
-        # colors shape: (N, 3), flat_indices shape: (N)
-        color_sum_grid.scatter_add_(0, flat_indices.unsqueeze(-1).expand(-1, 3), self.colors)
-        count_grid.scatter_add_(0, flat_indices, _torch.ones_like(flat_indices, dtype=_torch.float32))
-
-        # Calculate average: Sum / Count (avoid division by zero)
-        safe_count = count_grid.unsqueeze(-1).clamp(min=1.0)
-        mean_color_grid = color_sum_grid / safe_count
-
-        self.control_color_buffer = mean_color_grid.contiguous()
 
     def build_geometry_ads(self, vk_ads_info=None, just_update=False, reuse=True, **deferred) -> dict:
         """
@@ -175,10 +93,8 @@ class GS3D(_core.Map):
         # A Gaussian physically ends at roughly 3.0 standard deviations
         extents = (max_scales * 3.0).unsqueeze(-1) 
         
-        # Load perfectly tight bounding boxes into the Vulkan hardware tree!
+        # Load perfectly tight bounding boxes into the Vulkan hardware tree
         aabb_buffer.load(_torch.cat([positions - extents, positions + extents], dim=-1))
-
-        # aabb_buffer.load(_torch.cat([positions - self.radius, positions + self.radius], dim=-1))
         
         if not reuse or vk_ads_info is None:
             vk_geometry = _vk.aabb_collection()
@@ -207,7 +123,7 @@ class GS3D(_core.Map):
 
     def build_ads(self, just_update=False, reuse=True, **deferred):
         """
-        Builds the Top-Level Acceleration Structure (TLAS) and the Voxel Grid
+        Builds the Top-Level Acceleration Structure (TLAS)
         """
         self.initialized = True
         self.vk_geometry_ads_info = self.build_geometry_ads(just_update=just_update, reuse=reuse, **deferred)
@@ -259,5 +175,4 @@ class GS3D(_core.Map):
         
         self.ads = _vk.wrap_gpu(vk_scene_ads.handle)
         
-        # Voxel Grid after Ray Tracing ADS
-        self._build_decomposition_grid(grid_resolution=64)
+        # We no longer call _build_decomposition_grid here!

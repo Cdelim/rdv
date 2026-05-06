@@ -13,19 +13,11 @@ Based on: "Spectral and Decomposition Tracking for Rendering Heterogeneous Volum
 */
 
 // Helper Function: PCG Hash for Random Number Generation
-uint pcg_hash(inout uint state) {
-    uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
-    state = state * 747796405u + 2891336453u;
-    return (word >> 22u) ^ word;
-}
+// Helper Function: PCG Hash for Random Number Generation
 
-// Helper: Convert uint to float [0, 1)
-float step_rand(inout uint seed) {
-    return float(pcg_hash(seed)) / 4294967296.0;
-}
 
 FORWARD {
-
+    // 1. MEMORY BINDINGS
     GPUPtr positions_ptr = load_tensor(parameters.positions);
     vec3_ptr positions = vec3_ptr(positions_ptr);
 
@@ -38,133 +30,119 @@ FORWARD {
     GPUPtr opacities_ptr = load_tensor(parameters.opacities);
     float_ptr opacities = float_ptr(opacities_ptr);
 
-    GPUPtr majorant_ptr = load_tensor(parameters.majorant_buffer);
-    float_ptr majorants = float_ptr(majorant_ptr);
+   // 1. Set up the Ray
+   vec3 x = vec3(_input[0], _input[1], _input[2]);
+   vec3 w = normalize(vec3(_input[3], _input[4], _input[5]));
 
-    GPUPtr minorant_ptr = load_tensor(parameters.minorant_buffer);
-    float_ptr minorants = float_ptr(minorant_ptr);
+   // 2. Initialize the Framework's RNG State!
+   // Create a unique seed based on the ray's origin and direction
+   // Use raw binary float bits to guarantee a unique seed per pixel!
+    uint b1 = floatBitsToUint(w.x);
+    uint b2 = floatBitsToUint(w.y);
+    uint b3 = floatBitsToUint(w.z);
+    uint seed = b1 ^ (b2 * 1973u) ^ (b3 * 9277u);
 
-    GPUPtr min_bounds_ptr = load_tensor(parameters.grid_min);
-    vec3_ptr min_bounds = vec3_ptr(min_bounds_ptr);
+    // Mix it with a changing frame number to get different noise every frame
+    rdv_rng_state = uvec4(seed, seed * 1664525u, ~seed, seed ^ 0x23F1u);
+    random_step(); random_step(); // Double warm-up for safety
 
-    GPUPtr size_bounds_ptr = load_tensor(parameters.grid_size);
-    vec3_ptr size_bounds = vec3_ptr(size_bounds_ptr);
+    // 3. STORAGE FOR SORTING (Max 64 overlaps per ray)
+    const int MAX_HITS = 256;
+    int hit_indices[MAX_HITS];
+    float hit_distances[MAX_HITS];
+    int hit_count = 0;
 
-    GPUPtr control_color_ptr = load_tensor(parameters.control_color_buffer);
-    vec3_ptr control_colors = vec3_ptr(control_color_ptr);
+    // 4. QUERY THE HARDWARE BVH
+    rayQueryEXT rq;
+    rayQueryInitializeEXT(rq, accelerationStructureEXT(parameters.ads), gl_RayFlagsOpaqueEXT, 0xFF, x, 0.0, w, 1000.0); 
 
-    //RAY SETUP
-    vec3 x = vec3(_input[0], _input[1], _input[2]);
-    vec3 w = vec3(_input[3], _input[4], _input[5]);
+    while(rayQueryProceedEXT(rq)) {
+        if (rayQueryGetIntersectionTypeEXT(rq, false) == gl_RayQueryCandidateIntersectionAABBEXT) {
+            int index = rayQueryGetIntersectionPrimitiveIndexEXT(rq, false);
+            
+            // Calculate approximate distance along the ray to the Gaussian's center
+            vec3 d_center = positions.data[index] - x;
+            float t_proj = dot(d_center, w); 
 
-    
-    uint seed = uint(abs(x.x * 1973.0) + abs(w.y * 9277.0) + abs(w.z * 26699.0));
-    seed = pcg_hash(seed);
-
-    float T = 1.0; 
-    vec3 A = vec3(0.0); // Final accumulated color
-    float current_t = 0.0;
-    
-    int GRID_RES = 64; 
-    rayQueryEXT rayQuery;
-
-    uint step_count = 0;
-
-    // 4. MAIN TRACKING LOOP
-    while (T > 0.01) {
-        step_count++;
-        if(step_count > 1000) break; // Safety break to prevent infinite loops
-        if (current_t > 1000.0) break; // Maximum scene depth
-
-        vec3 current_pos = x + current_t * w;
-        
-        //Fixme
-        //Normalize to [0, 1] for voxel indexing
-        vec3 norm_pos = (current_pos - min_bounds.data[0]) / size_bounds.data[0];
-        
-        // Check if ray is outside the volume bounds
-        if (any(lessThan(norm_pos, vec3(0.0))) || any(greaterThan(norm_pos, vec3(1.0)))) {
-            current_t += 0.2; 
-            continue; 
-        }
-
-        int vox_x = clamp(int(norm_pos.x * float(GRID_RES)), 0, GRID_RES - 1);
-        int vox_y = clamp(int(norm_pos.y * float(GRID_RES)), 0, GRID_RES - 1);
-        int vox_z = clamp(int(norm_pos.z * float(GRID_RES)), 0, GRID_RES - 1);
-        int flat_idx = vox_x * (GRID_RES * GRID_RES) + vox_y * GRID_RES + vox_z;
-
-        float mu_bar = majorants.data[flat_idx]; // Majorant (Combined)
-        float mu_c   = minorants.data[flat_idx]; // Control Component (Minorant)
-
-        if (mu_bar < 0.001) {
-            current_t += 0.05;
-            continue; 
-        }
-
-        // Sample distance from control 
-        float t_c = (mu_c > 0.0) ? -log(1.0 - step_rand(seed)) / mu_c : 1e10;
-        
-        // Sample distance from residual
-        float t_r = -log(1.0 - step_rand(seed)) / (mu_bar - mu_c);
-
-        // Decision
-        if (t_c < t_r) {
-            current_t += t_c;
-            continue;
-            //fixme 
-            //A = control_colors.data[flat_idx];
-            //T = 0.0; 
-            //break;
-        } else {
-            // Residual Collision: Must evaluate specific Gaussians
-            current_t += t_r;
-            vec3 residual_pos = x + current_t * w;
-
-            // EVALUATE REAL DENSITY (Querying the ADS for nearby Gaussians)
-            rayQueryInitializeEXT(rayQuery, accelerationStructureEXT(parameters.ads), 
-                                  gl_RayFlagsOpaqueEXT, 0xFF, residual_pos, 0.0, w, 0.001); 
-
-            float mu_t_real = 0.0;
-            vec3 real_color = vec3(0.0);
-
-            while(rayQueryProceedEXT(rayQuery)) {
-                if (rayQueryGetIntersectionTypeEXT(rayQuery, false) == gl_RayQueryCandidateIntersectionAABBEXT) {
-                    int index = rayQueryGetIntersectionPrimitiveIndexEXT(rayQuery, false);
-                    vec3 d = residual_pos - positions.data[index];
-                    
-                    int cov_idx = index * 6;
-                    float power = -0.5 * (
-                        inv_covs.data[cov_idx + 0] * d.x * d.x + 
-                        inv_covs.data[cov_idx + 3] * d.y * d.y + 
-                        inv_covs.data[cov_idx + 5] * d.z * d.z +
-                        2.0 * inv_covs.data[cov_idx + 1] * d.x * d.y + 
-                        2.0 * inv_covs.data[cov_idx + 2] * d.x * d.z + 
-                        2.0 * inv_covs.data[cov_idx + 4] * d.y * d.z
-                    );
-
-                    if (power > -12.0) {
-                        float density = opacities.data[index] * exp(power);
-                        mu_t_real += density;
-                        real_color += colors.data[index] * density;
-                    }
-                }
+            // Only store Gaussians that are IN FRONT of the camera, up to the max limit
+            if (t_proj > 0.0 && hit_count < MAX_HITS) {
+                hit_indices[hit_count] = index;
+                hit_distances[hit_count] = t_proj;
+                hit_count++;
             }
-
-            // Probability of Residual Collision
-            // prob = (Actual Density - Base) / (Max Possible Density - Base)
-            float prob = clamp((mu_t_real - mu_c) / (mu_bar - mu_c), 0.0, 1.0);
-
-            if (step_rand(seed) < prob) {
-                // SUCCESS
-                A = real_color / max(mu_t_real, 0.0001); 
-                T = 0.0; 
-                break;
-            }
-            //Null collision
         }
     }
 
-    _output = float[](A.x, A.y, A.z);
+    // 5. SORT THE HITS FRONT-TO-BACK (Insertion Sort inside the GPU!)
+    for (int i = 1; i < hit_count; ++i) {
+        int key_index = hit_indices[i];
+        float key_dist = hit_distances[i];
+        int j = i - 1;
+
+        while (j >= 0 && hit_distances[j] > key_dist) {
+            hit_indices[j + 1] = hit_indices[j];
+            hit_distances[j + 1] = hit_distances[j];
+            j = j - 1;
+        }
+        hit_indices[j + 1] = key_index;
+        hit_distances[j + 1] = key_dist;
+    }
+
+    // 6. THE PROFESSOR'S ANALYTICAL STOCHASTIC EVALUATION
+    vec3 final_color = vec3(0.0); // Default background is White
+
+    for (int k = 0; k < hit_count; ++k) {
+        int i = hit_indices[k];
+        int cov_idx = i * 6;
+        
+        vec3 d = x - positions.data[i]; 
+
+        // Load the Inverse Covariance Matrix
+        float M00 = inv_covs.data[cov_idx + 0];
+        float M01 = inv_covs.data[cov_idx + 1];
+        float M02 = inv_covs.data[cov_idx + 2];
+        float M11 = inv_covs.data[cov_idx + 3];
+        float M12 = inv_covs.data[cov_idx + 4];
+        float M22 = inv_covs.data[cov_idx + 5];
+
+        // Analytical Quadratic Variables
+        float A = M00*w.x*w.x + M11*w.y*w.y + M22*w.z*w.z + 
+                  2.0 * (M01*w.x*w.y + M02*w.x*w.z + M12*w.y*w.z);
+
+        float C = M00*d.x*d.x + M11*d.y*d.y + M22*d.z*d.z + 
+                  2.0 * (M01*d.x*d.y + M02*d.x*d.z + M12*d.y*d.z);
+
+        float B = M00*w.x*d.x + M11*w.y*d.y + M22*w.z*d.z + 
+                  M01*(w.x*d.y + w.y*d.x) + M02*(w.x*d.z + w.z*d.x) + M12*(w.y*d.z + w.z*d.y);
+
+        if (A > 1e-6) {
+            float power = -0.5 * (C - ((B * B) / A));
+
+            // If the math isn't astronomical, evaluate the exact area under the curve
+            if (power > -15.0 && power <= 0.0) {
+               // 1. Convert the 2D PLY opacity into a peak 3D Optical Depth
+                // We clamp it to 0.999 so the log() function doesn't hit infinity!
+                float target_alpha = min(opacities.data[i], 0.999);
+                float peak_tau = -log(1.0 - target_alpha);
+
+                // 2. Apply the true 3D Volumetric bell-curve falloff along the ray
+                float exact_tau = peak_tau * exp(power);
+                
+                // 3. Convert back to a probability for the dice roll
+                float hit_probability = 1.0 - exp(-exact_tau);
+
+                // ROLL THE DICE!
+                if (step_rand(seed) < hit_probability) {
+                    final_color = colors.data[i];
+                    break; 
+                }
+                // If we missed, the loop continues to the next closest Gaussian...
+            }
+        }
+    }
+
+    // 7. OUTPUT THE RESULT
+    _output = float[](final_color.x, final_color.y, final_color.z);
 }
 
 BACKWARD {
