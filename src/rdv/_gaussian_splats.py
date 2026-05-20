@@ -2,6 +2,10 @@ import torch as _torch
 from . import _core
 import vulky as _vk
 
+import torch as _torch
+from . import _core
+import vulky as _vk
+
 class GS3D(_core.Map):
     __extension_info__ = dict(
         path=_core.__INCLUDE_PATH__ + '/volume_rendering/decomposition_tracking_GS.h',
@@ -11,7 +15,8 @@ class GS3D(_core.Map):
             colors=_torch.Tensor,
             inv_covs=_torch.Tensor,
             opacities=_torch.Tensor,
-            scales = _torch.Tensor
+            scales = _torch.Tensor,
+            f_rest = _torch.Tensor  # 1. FIXED: Tell Vulkan to expect a Tensor here!
         ),
         stochastic = True  # Keep this so your C++ random() works!
     )
@@ -20,6 +25,7 @@ class GS3D(_core.Map):
                  colors:_core.TensorLike | _core.deferred, 
                  inv_covs:_core.TensorLike | _core.deferred, 
                  opacities:_core.TensorLike | _core.deferred, 
+                 f_rest:_core.TensorLike | _core.deferred,  # 2. ADDED: Accept f_rest in the constructor
                  transform: _core.TensorLike | _core.deferred = None, 
                  scales: _core.TensorLike | _core.deferred = None,
                  input_dim=None, output_dim=None, input_requires_grad=False, bw_uses_output=False):
@@ -28,9 +34,11 @@ class GS3D(_core.Map):
         colors = _core.ensure_tensor(colors, map_dim=2)
         inv_covs = _core.ensure_tensor(inv_covs, map_dim=2)
         opacities = _core.ensure_tensor(opacities, map_dim=1)
+        f_rest = _core.ensure_tensor(f_rest, map_dim=2) # 3. ADDED: Ensure it is a valid 2D tensor
         
         assert len(positions.shape) == 2 and positions.shape[-1] == 3, "GS3D requires positions to be of shape (N, 3)"
         assert len(colors.shape) == 2, "GS3D requires colors to be of shape (N, C)"
+        assert f_rest.shape[-1] == 45, f"GS3D requires f_rest to have 45 columns, got {f_rest.shape[-1]}" # 4. ADDED: Safety check
         
         if output_dim is None:
             output_dim = colors.shape[-1]  
@@ -53,6 +61,7 @@ class GS3D(_core.Map):
         self.colors = colors
         self.inv_covs = inv_covs
         self.opacities = opacities
+        self.f_rest = f_rest      # 5. ADDED: Save it to the instance
         self.transform = transform
         self.scales = scales
         
@@ -66,9 +75,13 @@ class GS3D(_core.Map):
             colors=self.colors,
             inv_covs=self.inv_covs,
             opacities=self.opacities,
+            f_rest=self.f_rest,   # 6. ADDED: Ensure clone passes it down!
             transform=self.transform,
+            scales=self.scales,
             **kwargs
         )
+
+    # ... (Keep build_geometry_ads and build_ads exactly the same!) ...
 
     def build_geometry_ads(self, vk_ads_info=None, just_update=False, reuse=True, **deferred) -> dict:
         """
