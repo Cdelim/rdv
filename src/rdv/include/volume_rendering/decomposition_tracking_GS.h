@@ -17,7 +17,6 @@ Based on: "Spectral and Decomposition Tracking for Rendering Heterogeneous Volum
 
 
 FORWARD {
-    // 1. MEMORY BINDINGS
     GPUPtr positions_ptr = load_tensor(parameters.positions);
     vec3_ptr positions = vec3_ptr(positions_ptr);
     GPUPtr colors_ptr = load_tensor(parameters.colors);
@@ -29,11 +28,9 @@ FORWARD {
     GPUPtr f_rest_ptr = load_tensor(parameters.f_rest);
     float_ptr f_rest = float_ptr(f_rest_ptr);
 
-    // 2. RAY SETUP
     vec3 x = vec3(_input[0], _input[1], _input[2]);
     vec3 w = normalize(vec3(_input[3], _input[4], _input[5]));
 
-    // 3. INITIALIZE THE SCRAMBLER
     uint b1 = floatBitsToUint(w.x);
     uint b2 = floatBitsToUint(w.y);
     uint b3 = floatBitsToUint(w.z);
@@ -41,15 +38,12 @@ FORWARD {
     rdv_rng_state = uvec4(seed, seed * 1664525u, ~seed, seed ^ 0x23F1u);
     random_step(); random_step(); 
 
-    // 4. PRE-COMPUTE SPHERICAL HARMONICS 
     float sh_coefs[16];
     eval_sh(w, sh_coefs); 
 
-    // 5. NO ARRAYS! JUST TRACK THE CLOSEST HIT
     float closest_t = 10000.0;
     vec3 final_color = vec3(0.0); // Black background
     
-    // 6. QUERY THE HARDWARE BVH
     rayQueryEXT rq;
     rayQueryInitializeEXT(rq, accelerationStructureEXT(parameters.ads), gl_RayFlagsOpaqueEXT, 0xFF, x, 0.0, w, 10000.0); 
 
