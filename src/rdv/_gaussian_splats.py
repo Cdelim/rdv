@@ -16,16 +16,18 @@ class GS3D(_core.Map):
             inv_covs=_torch.Tensor,
             opacities=_torch.Tensor,
             scales = _torch.Tensor,
-            f_rest = _torch.Tensor  # 1. FIXED: Tell Vulkan to expect a Tensor here!
+            f_rest = _torch.Tensor, 
+            covs = _torch.Tensor  
         ),
         stochastic = True  # Keep this so your C++ random() works!
     )
 
     def __init__(self, positions: _core.TensorLike | _core.deferred, 
                  colors:_core.TensorLike | _core.deferred, 
-                 inv_covs:_core.TensorLike | _core.deferred, 
+                 inv_covs:_core.TensorLike | _core.deferred,
+                 covs:_core.TensorLike | _core.deferred,   
                  opacities:_core.TensorLike | _core.deferred, 
-                 f_rest:_core.TensorLike | _core.deferred,  # 2. ADDED: Accept f_rest in the constructor
+                 f_rest:_core.TensorLike | _core.deferred, 
                  transform: _core.TensorLike | _core.deferred = None, 
                  scales: _core.TensorLike | _core.deferred = None,
                  input_dim=None, output_dim=None, input_requires_grad=False, bw_uses_output=False):
@@ -33,6 +35,7 @@ class GS3D(_core.Map):
         positions = _core.ensure_tensor(positions, map_dim=2)
         colors = _core.ensure_tensor(colors, map_dim=2)
         inv_covs = _core.ensure_tensor(inv_covs, map_dim=2)
+        covs = _core.ensure_tensor(covs, map_dim=2)
         opacities = _core.ensure_tensor(opacities, map_dim=1)
         f_rest = _core.ensure_tensor(f_rest, map_dim=2) # 3. ADDED: Ensure it is a valid 2D tensor
         
@@ -64,6 +67,7 @@ class GS3D(_core.Map):
         self.f_rest = f_rest      # 5. ADDED: Save it to the instance
         self.transform = transform
         self.scales = scales
+        self.covs = covs
         
         self.vk_geometry_ads_info = None
         self.vk_ads_info = None
@@ -78,6 +82,7 @@ class GS3D(_core.Map):
             f_rest=self.f_rest,   # 6. ADDED: Ensure clone passes it down!
             transform=self.transform,
             scales=self.scales,
+            covs=self.covs,
             **kwargs
         )
 
@@ -101,12 +106,27 @@ class GS3D(_core.Map):
             assert positions.shape[0] == vk_ads_info['num_primitives'], "Primitive count mismatch"
             aabb_buffer = vk_ads_info['aabb_buffer']
 
-        max_scales = _torch.max(self.scales, dim=-1)[0]
-        
-        # A Gaussian physically ends at roughly 3.0 standard deviations
-        extents = (max_scales * 3.0).unsqueeze(-1) 
-        
-        # Load perfectly tight bounding boxes into the Vulkan hardware tree
+        # Ensure we have the raw covariance matrix (shape N, 6)
+        if hasattr(self, 'covs') and self.covs is not None:
+            # The diagonal elements of the 6-value covariance matrix are at indices 0, 3, and 5
+            cov_xx = self.covs[:, 0]
+            cov_yy = self.covs[:, 3]
+            cov_zz = self.covs[:, 5]
+            
+            # The physical extent is 3 standard deviations (sqrt of variance)
+            extents_x = (_torch.sqrt(cov_xx) * 3.0).unsqueeze(-1)
+            extents_y = (_torch.sqrt(cov_yy) * 3.0).unsqueeze(-1)
+            extents_z = (_torch.sqrt(cov_zz) * 3.0).unsqueeze(-1)
+            
+            # Stack them into a highly accurate 3D bounding box!
+            extents = _torch.cat([extents_x, extents_y, extents_z], dim=-1)
+        else:
+            # Fallback to the static bounding volume with biggest gaussian
+            max_scales = _torch.max(self.scales, dim=-1)[0]
+            extents = (max_scales * 3.0).unsqueeze(-1) 
+            extents = extents.expand(-1, 3) # Ensure it has 3 columns
+
+        # Load the tight bounding boxes into the Vulkan hardware tree
         aabb_buffer.load(_torch.cat([positions - extents, positions + extents], dim=-1))
         
         if not reuse or vk_ads_info is None:
