@@ -28,16 +28,12 @@ FORWARD {
     // notice, in this point wo is not normalized, but is not a problem since we will use it for traversing the unnormalized density field, and we will normalize it later for sampling the phase function
     for (int i=0; i<SPECTRAL_DIM; i++)
         _output[i] = 0.0;
+    _output[SPECTRAL_DIM] = 1.0;
 
     float tMin, tMax;
     ray_box_intersection(x, wo, tMin, tMax);
     if (tMax <= 0 || tMin > tMax) // ray points away from the volume
-    {
-#ifdef ENVIRONMENT
-        environment(_this, w, _output); // direct environment lighting
-#endif
         return;
-    }
     tMin = max(0, tMin);
 
     x += wo * tMin; // initial position in object space
@@ -46,6 +42,7 @@ FORWARD {
     float W[SPECTRAL_DIM]; // path throughput, accumulation is direct to output to save register, so we need to store it in a local variable
     for (int i=0; i<SPECTRAL_DIM; i++)
         W[i] = 1.0;
+
     int bounces = 0;
     while (d > 0) {
         float maj_distance;
@@ -66,6 +63,7 @@ FORWARD {
         scattering_albedo(_this, x, sa); // compute scattering albedo
         for (int i=0; i<SPECTRAL_DIM; i++)
             W[i] *= sa[i];
+        bounces ++;
 
         bool some_throughput = false;
         for (int i=0; i<SPECTRAL_DIM; i++)
@@ -97,13 +95,16 @@ FORWARD {
         wo = L * w; // convert scattering direction to object space for next iteration of ray marching
         // compute next distance
         ray_box_intersection(x, wo, tMin, d); // compute intersection with volume boundary for next iteration
-        bounces ++;
     }
 
+
+    if (bounces > 0) {
+        _output[SPECTRAL_DIM] = 0.0; // assumed scattering
 #ifdef ENVIRONMENT
-    float env[SPECTRAL_DIM];
-    environment(_this, w, env); // add environment contribution if ray escaped the volume
-    for (int i=0; i<SPECTRAL_DIM; i++)
-        _output[i] += W[i] * env[i];
+        float env[SPECTRAL_DIM];
+        environment(_this, w, env); // add environment contribution if ray escaped the volume
+        for (int i=0; i<SPECTRAL_DIM; i++)
+            _output[i] += W[i] * env[i];
 #endif
+    }
 }

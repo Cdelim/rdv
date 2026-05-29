@@ -34,3 +34,7 @@ if (parameters.align_corners != 0) {
     for (int i=0; i<OUTPUT_DIM; i++)
         _output[i] = v[i];
 }
+
+BACKWARD {
+    NOT_SUPPORTED("Backward pass is not supported for map_gpu_sample.");
+}

@@ -45,10 +45,13 @@ def resample_2d(imgs, size, mode: str = 'bilinear', align_corners=True):
 def accumulate(p, times, verbose=True):
     assert times > 0
     with _torch.no_grad():
-        img = p()
-        steps = range(1, times) if not verbose else tqdm(range(1, times), "Accumulating:")
-        for i in steps:
-            _torch.add(img, p(), alpha=1, out=img)
-        return img/times
+        acc = None
+        steps = range(times) if not verbose else tqdm(range(times), "Accumulating:")
+        for _ in steps:
+            if acc is None:
+                acc = p().clone()
+            else:
+                _torch.add(acc, p(), alpha=1.0, out=acc)
+        return acc / times
 
 

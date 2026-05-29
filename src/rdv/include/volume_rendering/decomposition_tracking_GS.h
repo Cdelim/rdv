@@ -7,65 +7,111 @@ parameters:
 - scale: each gaussian's scale
 - sh: each gaussian's spherical harmonic coefficients
 */
+/*
+Decomposition Tracking for 3D Gaussian Splatting
+Based on: "Spectral and Decomposition Tracking for Rendering Heterogeneous Volumes"
+*/
+
+// Helper Function: PCG Hash for Random Number Generation
+// Helper Function: PCG Hash for Random Number Generation
+
 
 FORWARD {
     GPUPtr positions_ptr = load_tensor(parameters.positions);
     vec3_ptr positions = vec3_ptr(positions_ptr);
-
     GPUPtr colors_ptr = load_tensor(parameters.colors);
     vec3_ptr colors = vec3_ptr(colors_ptr);
+    GPUPtr inv_covs_ptr = load_tensor(parameters.inv_covs);
+    float_ptr inv_covs = float_ptr(inv_covs_ptr);
+    GPUPtr opacities_ptr = load_tensor(parameters.opacities);
+    float_ptr opacities = float_ptr(opacities_ptr);
+    GPUPtr f_rest_ptr = load_tensor(parameters.f_rest);
+    float_ptr f_rest = float_ptr(f_rest_ptr);
 
     vec3 x = vec3(_input[0], _input[1], _input[2]);
-    vec3 w = vec3(_input[3], _input[4], _input[5]);
+    vec3 w = normalize(vec3(_input[3], _input[4], _input[5]));
 
-    float T = 1.0; // transmittance
-    vec3 A = vec3(0.0);
-    float current_t = 0;
-    rayQueryEXT rayQuery;
-    while (true) {
-        rayQueryInitializeEXT(rayQuery,              // Ray query
-                            accelerationStructureEXT(parameters.ads),                  // Top-level acceleration structure
-                            gl_RayFlagsOpaqueEXT ,  // Ray flags, here saying "treat all geometry as opaque"
-                            0xFF,                  // 8-bit instance mask, here saying "trace against all instances"
-                            x,                  // Ray origin
-                            current_t + 0.0001,                   // Minimum t-value
-                            w,            // Ray direction
-                            10000.0);              // Maximum t-value
+    uint b1 = floatBitsToUint(w.x);
+    uint b2 = floatBitsToUint(w.y);
+    uint b3 = floatBitsToUint(w.z);
+    uint seed = b1 ^ (b2 * 1973u) ^ (b3 * 9277u);
+    rdv_rng_state = uvec4(seed, seed * 1664525u, ~seed, seed ^ 0x23F1u);
+    random_step(); random_step(); 
 
-        // you need to care for the minimum t-value when traversing the ray query, otherwise you might get stuck at the same intersection and cause infinite loop
-        float minimum_t = 10000.0;
-        while(rayQueryProceedEXT(rayQuery)) {
-            if (rayQueryGetIntersectionTypeEXT(rayQuery, false) == gl_RayQueryCandidateIntersectionAABBEXT)
-            {
-                // get the primitive index (AABB index)
-                int primitive_index = rayQueryGetIntersectionPrimitiveIndexEXT(rayQuery, false);
-                float tmin, tmax;
-                ray_sphere_intersection(x, w, positions.data[primitive_index], parameters.radius, tmin, tmax);
-                if (tmax <= 0.0 || tmin >= tmax || current_t >= tmax) // no intersection with the AABB after current_t
-                    continue;
-                float t = tmin <= current_t ? tmax : tmin; // if tmin is negative, it means the ray origin is inside the box, we take tmax as the exit point
-                // Report intersection candidate
-                if (t < minimum_t) {
-                    minimum_t = t;
-                    rayQueryGenerateIntersectionEXT(rayQuery, t);
+    float sh_coefs[16];
+    eval_sh(w, sh_coefs); 
+
+    float closest_t = 10000.0;
+    vec3 final_color = vec3(0.0); // Black background
+    
+    rayQueryEXT rq;
+    rayQueryInitializeEXT(rq, accelerationStructureEXT(parameters.ads), gl_RayFlagsOpaqueEXT, 0xFF, x, 0.0, w, 10000.0); 
+
+    while(rayQueryProceedEXT(rq)) {
+        if (rayQueryGetIntersectionTypeEXT(rq, false) == gl_RayQueryCandidateIntersectionAABBEXT) {
+            int i = rayQueryGetIntersectionPrimitiveIndexEXT(rq, false);
+            
+            vec3 d_center = positions.data[i] - x;
+            float t_proj = dot(d_center, w); 
+
+            // MASSIVE OPTIMIZATION: 
+            // Only do the heavy math if this Gaussian is in front of the camera 
+            // AND closer than our current best hit!
+            if (t_proj > 0.0 && t_proj < closest_t) {
+                
+                int cov_idx = i * 6;
+                vec3 d = x - positions.data[i]; 
+
+                float M00 = inv_covs.data[cov_idx + 0];
+                float M01 = inv_covs.data[cov_idx + 1];
+                float M02 = inv_covs.data[cov_idx + 2];
+                float M11 = inv_covs.data[cov_idx + 3];
+                float M12 = inv_covs.data[cov_idx + 4];
+                float M22 = inv_covs.data[cov_idx + 5];
+
+                float A = M00*w.x*w.x + M11*w.y*w.y + M22*w.z*w.z + 2.0 * (M01*w.x*w.y + M02*w.x*w.z + M12*w.y*w.z);
+                float C = M00*d.x*d.x + M11*d.y*d.y + M22*d.z*d.z + 2.0 * (M01*d.x*d.y + M02*d.x*d.z + M12*d.y*d.z);
+                float B = M00*w.x*d.x + M11*w.y*d.y + M22*w.z*d.z + M01*(w.x*d.y + w.y*d.x) + M02*(w.x*d.z + w.z*d.x) + M12*(w.y*d.z + w.z*d.y);
+
+                if (A > 1e-6) {
+                    float power = -0.5 * (C - ((B * B) / A));
+
+                    if (power > -15.0 && power <= 0.0) {
+                        float target_alpha = min(opacities.data[i], 0.999);
+                        float peak_tau = -log(1.0 - target_alpha);
+                        float exact_tau = peak_tau * exp(power);
+                        float alpha = 1.0 - exp(-exact_tau);
+
+                        // --- THE MONTE CARLO DICE ROLL ---
+                        if (random() < alpha) {
+                            
+                            // WE HIT IT! Update the closest boundary so we can ignore 
+                            // anything further away for the rest of the BVH search!
+                            closest_t = t_proj;
+                            
+                            vec3 gaussian_color = colors.data[i] * sh_coefs[0]; 
+
+                            // 2. Add the 15 Rest Coefficients (Degrees 1, 2, and 3)
+                            int rest_idx = i * 45;
+                            for(int c = 1; c < 16; ++c) {
+                                // The PLY file stores f_rest as: 15 Reds, 15 Greens, 15 Blues!
+                                gaussian_color.x += f_rest.data[rest_idx + (c - 1) +  0] * sh_coefs[c]; // Red
+                                gaussian_color.y += f_rest.data[rest_idx + (c - 1) + 15] * sh_coefs[c]; // Green
+                                gaussian_color.z += f_rest.data[rest_idx + (c - 1) + 30] * sh_coefs[c]; // Blue
+                            }
+
+                            // 3. Center color space, clamp, and WE ARE DONE. 
+                            final_color = clamp(gaussian_color + 0.5, 0.0, 1.0);
+                        }
+                    }
                 }
             }
         }
-
-        if (rayQueryGetIntersectionTypeEXT(rayQuery, true) == 0)
-        break;
-
-        // get the committed intersection information
-        int primitive_index = rayQueryGetIntersectionPrimitiveIndexEXT(rayQuery, true);
-        current_t = rayQueryGetIntersectionTEXT(rayQuery, true) + 0.001;
-        float alpha = 0.85;
-        A += T * alpha * colors.data[primitive_index]; // some color there...
-        T *= (1 - alpha); // opacity loss
-        if (T < 0.01)
-        break;
     }
-    _output = float[](A.x, A.y, A.z); // finish
-}
 
+    // 7. OUTPUT THE RESULT
+    _output = float[](final_color.x, final_color.y, final_color.z);
+}
 BACKWARD {
+    // Differentiation logic goes here
 }

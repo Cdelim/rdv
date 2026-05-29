@@ -102,7 +102,7 @@ from vulky import (
     execute_loop,
     allow_cross_threading,
     vec2, vec3, vec4, mat2, mat3, mat3x4, mat4x3, mat4, ivec2, ivec3, ivec4,
-
+    syncronize_external_computation,
 )
 
 __all__ = [
@@ -112,7 +112,6 @@ __all__ = [
     'Map',
     'Compute',
     'ComputeTask',
-    'DeferrableField',
     'deferred',
     'ensure_tensor',
     'RaycastableInfo',

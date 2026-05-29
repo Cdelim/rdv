@@ -12,7 +12,6 @@ import weakref as _weakref
 
 __SEEDS_POOL__ = None
 __INCLUDE_PATH__ = _os.path.dirname(__file__).replace('\\','/') + '/include'
-__TORCH_DEVICE__ = _torch.device('cuda:0') if _torch.cuda.is_available() else _torch.device('cpu')  #TODO: Check with AMD
 __RDV_PATH__ = _os.path.dirname(__file__)
 
 __RDV_PROFILER__ = None
@@ -41,7 +40,7 @@ def device() -> _torch.device:
     Ensure tensors are valid for rdv compute and maps using:
     >>> t.to(rdv.device())
     """
-    return __TORCH_DEVICE__
+    return _vk.torch_device()
 
 
 def manual_seed(seed: _typing.Optional[int] = None):
@@ -228,7 +227,9 @@ def as_tensor(t: TensorLike) -> _torch.Tensor:
     if not isinstance(t, _torch.Tensor):
         if isinstance(t, float) or isinstance(t, int):
             t = [t]
-        t = _vk.tensor_copy(_torch.as_tensor(t, device=device()))
+        if isinstance(t, tuple):
+            t = list(t)
+        t = _vk.tensor_copy(_torch.as_tensor(t, dtype=_torch.float32, device=device()))
     return t
 
 
@@ -578,12 +579,14 @@ class _DispatcherEngine(object):
 
     @classmethod
     def destroy_gpu_image(cls, image_dim: int, id: int):
+        # print("Releasing VK Image...")
         assert image_dim in [1, 2, 3], "Only 1 to 3 dimensions are supported for images"
         l = cls.__IMAGES__[image_dim - 1]
         r = cls.__IMAGES_REUSABLE_INDICES__[image_dim - 1]
         assert id < len(l) and l[id] is not None, f"Trying to destroy a non existing image with id {id} and dimension {image_dim}"
         l[id] = None  # remove reference for automatic destroying
         r.append(id)
+        # print("...done")
 
     @classmethod
     def dispatch(cls, instance: 'Compute', task: 'ComputeTask'):
@@ -695,8 +698,8 @@ cls.create_support_code()
 
 def _start_session():
     try:
-        __devices = _os.environ['CUDA_VISIBLE_DEVICES'].split(',')  # = str(rdv_device)
-        rdv_device = int(__devices[0])
+        __device = _os.environ['RDV_DEVICE']  # = str(rdv_device)
+        rdv_device = int(__device)
     except:
         rdv_device = 0
     debug = bool(_os.environ.get('RDV_DEBUG', 'False') == 'True')
@@ -918,7 +921,8 @@ class MapStruct(MapElement):
         type_definition = object.__getattribute__(self, '_type_definition')
         accessor = object.__getattribute__(self, '_accessor')
         generics = object.__getattribute__(self, '_generics')
-        assert item in type_definition
+        if item not in type_definition:
+            raise AttributeError(f"Attribute {item} not found in MapStruct with type definition {type_definition}")
         try:
             return super().__getattribute__(item)
         except:
@@ -1126,6 +1130,10 @@ class Map(object, metaclass=_MapMeta):
              output_dim=None,
              input_requires_grad=None,
              bw_uses_output=None) -> 'Map':
+        if input_requires_grad is None:
+            input_requires_grad = self.input_requires_grad
+        if bw_uses_output is None:
+            bw_uses_output = self.bw_uses_output
         if self.rdv_cast_cache is None:
             object.__setattr__(self, 'rdv_cast_cache', {})
         key = (input_dim, output_dim, input_requires_grad, bw_uses_output)
@@ -1139,7 +1147,7 @@ class Map(object, metaclass=_MapMeta):
         if input_dim is None:
             input_dim = self.input_dim
         if self.input_dim != input_dim:
-            assert self.input_dim is None
+            assert self.input_dim is None, f"Mismatch in input dim casting to {input_dim} having {self.input_dim}."
             changed |= True
         if output_dim is None:
             output_dim = self.output_dim
@@ -1151,11 +1159,7 @@ class Map(object, metaclass=_MapMeta):
                 changed |= False
             else:
                 changed |= True
-        if input_requires_grad is None:
-            input_requires_grad = self.input_requires_grad
         changed |= input_requires_grad != self.input_requires_grad
-        if bw_uses_output is None:
-            bw_uses_output = self.bw_uses_output
         changed |= bw_uses_output != self.bw_uses_output
         s = self
         if changed:
@@ -1379,12 +1383,10 @@ class Compute(Singleton, metaclass=_ComputeMeta):
         if map not in self.__CAST__:
             self.__CAST__[map] = {}
         if key not in self.__CAST__[map]:
-            self.__CAST__[map][key] = map.cast(
-                input_dim=input_dim,
-                output_dim=output_dim,
-                input_requires_grad=input_requires_grad,
-                bw_uses_output=bw_uses_output
-            )
+            cast_map = map.cast(input_dim=input_dim, output_dim=output_dim, input_requires_grad=input_requires_grad, bw_uses_output=bw_uses_output)
+            if cast_map is map:
+                return map  # to avoid circular reference in cache if no change is needed
+            self.__CAST__[map][key] = cast_map
         return self.__CAST__[map][key]
 
     @classmethod
@@ -2301,6 +2303,7 @@ class GPUSampleMap(Map):
             image_index=int,
             sampler_index=int,
             align_corners=int,
+            pad=int,
             shape=['INPUT_DIM', int]
         )
     )
@@ -2347,7 +2350,7 @@ class GPUSampleMap(Map):
 
     def clone(self,
               **kwargs) -> 'Map':
-        return GPUSampleMap(self.grid, self.preassigned_handles, self.align_corners, self.sampler_index == 1, **kwargs)
+        return GPUSampleMap(self.grid, self.preassigned_handles, self.align_corners, self.sampler_index == 0, **kwargs)
 
 
 # ============================

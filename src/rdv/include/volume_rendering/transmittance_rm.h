@@ -1,10 +1,7 @@
 #define SUBMAP_NAME extinction
 #include "signatures/vec3_to_float.h"
 
-#define SUBMAP_NAME majorant
-#include "signatures/vec3_vec3_to_float_float.h"
-
-#include "trait_transmittance_rt.h"
+#include "trait_transmittance_rm.h"
 
 FORWARD {
     vec3 x = vec3(_input[0], _input[1], _input[2]);
@@ -31,6 +28,6 @@ FORWARD {
     x += wo * tMin; // initial position in object space
     float d = tMax - tMin; // max_t wrt wo
 
-    _output[0] = transmittance_rt(_this, x, wo, d);
+    _output[0] = transmittance_rm(_this, x, wo, d, parameters.step_size);
 }
 
