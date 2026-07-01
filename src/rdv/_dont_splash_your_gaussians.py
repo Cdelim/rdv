@@ -19,7 +19,7 @@ class DSYG(_core.Map):
             f_rest = _torch.Tensor, 
             covs = _torch.Tensor  
         ),
-        stochastic = True  # Keep this so your C++ random() works!
+        stochastic = False  # Keep this so your C++ random() works!
     )
 
     def __init__(self, positions: _core.TensorLike | _core.deferred, 
