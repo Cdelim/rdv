@@ -126,15 +126,11 @@ FORWARD {
             if (power > -15.0 && power <= 0.0) {
                 
                 // --- THE PURE 3D ANALYTICAL INTEGRAL ---
-                // opacities.data[i] now holds True Volumetric Density (thanks to Python mapping!)
-                float density_multiplier = opacities.data[i]; 
-                
-                // Evaluate the exact 3D integral of the Gaussian along the ray
-                float peak_falloff = exp(power);
-                float true_thickness = sqrt(6.28318 / A); 
-                
-                // Calculate the final physical optical depth
-                float exact_tau = density_multiplier * peak_falloff * true_thickness;
+                // THE SIMPLIFIED 3D INTEGRAL
+                // Because thickness cancels out, we evaluate the peak density directly!
+                float target_alpha = min(opacities.data[i], 0.999);
+                float peak_tau = -log(1.0 - target_alpha);
+                float exact_tau = peak_tau * exp(power);
                 float alpha = 1.0 - exp(-exact_tau);
 
                 // --- COLOR & SH CALCULATION ---
