@@ -51,6 +51,7 @@ from ._core import *
 from ._rendering import *
 from ._gaussian_splats import *
 from ._volume_rendering import *
+from ._dont_splash_your_gaussians import *
 # (
 #     CameraProbes,
 #     Geometry,
