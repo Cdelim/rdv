@@ -156,6 +156,7 @@ FORWARD {
             T *= (1.0 - alpha);
         }
     }
+    }   
     // T remaining = background contribution (black here)
 
     _output = float[](final_color.x, final_color.y, final_color.z);
