@@ -39,7 +39,7 @@ FORWARD {
     random_step(); random_step(); 
 
     float sh_coefs[16];
-    eval_sh(-w, sh_coefs); 
+    eval_sh(w, sh_coefs); 
 
     float closest_t = 10000.0;
 
