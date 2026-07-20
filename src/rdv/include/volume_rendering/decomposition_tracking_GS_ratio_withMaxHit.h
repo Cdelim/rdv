@@ -62,7 +62,7 @@ FORWARD {
     eval_sh(w, sh_coefs);
 
     // ---- PHASE 1: COLLECT every candidate + its exact alpha (unsorted) ----
-    const int MAX_HITS = 256;
+    const int MAX_HITS = 4096;
     int   hit_indices[MAX_HITS];
     float hit_depths[MAX_HITS];
     float hit_alphas[MAX_HITS];
