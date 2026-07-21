@@ -295,7 +295,21 @@ def render_frame(model, state, samples, width, height):
     sensor = make_sensor(width, height, camera_poses)
     img = sensor.view(model, samples=int(samples)).capture()[0]
     arr = np.clip(img.detach().cpu().numpy(), 0.0, 1.0)
-    return np.flipud(arr)  # same row-order flip used throughout this project
+    # BOTH axes need flipping, not just one -- found this out empirically while
+    # debugging the companion notebooks against real ground truth photos:
+    # (1) vertical: rdv renders with row 0 = bottom of the scene, an established
+    #     convention elsewhere in this project.
+    # (2) horizontal: the camera's "right" direction, from cross(up, forward) in
+    #     perspective_camera_sensors.h, comes out mirrored relative to how the
+    #     point cloud is laid out -- most likely a left/right-handedness mismatch
+    #     between the scene's coordinate convention and what the shader's
+    #     cross-product assumes. This is a property of the scene + shader
+    #     pairing (not of this file's own yaw/pitch camera math), so it applies
+    #     here too even though this viewer builds its pose differently than the
+    #     notebooks' cameras.json-derived one.
+    # ascontiguousarray avoids a crash when this later goes into cv2/torch,
+    # neither of which accept negative-stride arrays.
+    return np.ascontiguousarray(arr[::-1, ::-1, :])
 
 
 class MouseLook:
