@@ -34,7 +34,7 @@ class GS3D_Ratio(_core.Map):
             f_rest=_torch.Tensor,
             covs=_torch.Tensor
         ),
-        stochastic=False  # no accept/reject randomness in the blending step itself;
+        stochastic=True  # no accept/reject randomness in the blending step itself;
                           # the only randomness left in a full render is the sensor's
                           # own pixel-jitter, if any.
     )
