@@ -54,6 +54,7 @@ from ._volume_rendering import *
 from ._dont_splash_your_gaussians import *
 from ._gaussian_splats_ratio import *
 from ._gaussian_splats_sampled import *
+from ._gaussian_splats_sampled_density import *
 # (
 #     CameraProbes,
 #     Geometry,
