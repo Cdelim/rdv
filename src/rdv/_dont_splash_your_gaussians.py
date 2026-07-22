@@ -8,7 +8,7 @@ import vulky as _vk
 
 class DSYG(_core.Map):
     __extension_info__ = dict(
-        path=_core.__INCLUDE_PATH__ + '/volume_rendering/DontSplashYourGaussians.h',
+        path=_core.__INCLUDE_PATH__ + '/volume_rendering/DontSplashYourGaussians_v3_faithful.h',
         parameters=dict(
             ads=_torch.int64,
             positions=_torch.Tensor,
