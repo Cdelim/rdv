@@ -137,7 +137,9 @@ FORWARD {
         // --- find the next NEW entry beyond t_cursor, via one fresh ray query ---
         int   new_idx = -1;
         float new_entry_t = 1e30;
-        float new_A = 0.0, new_B = 0.0, new_C = 0.0;
+        float new_A = 0.0;
+        float new_B = 0.0; 
+        float new_C = 0.0;
 
         rayQueryEXT rq;
         rayQueryInitializeEXT(rq, accelerationStructureEXT(parameters.ads),
@@ -187,7 +189,8 @@ FORWARD {
         }
 
         // --- next EXIT among currently active primitives ---
-        float exit_t = 1e30; int exit_slot = -1;
+        float exit_t = 1e30; 
+        int exit_slot = -1;
         for (int a = 0; a < active_count; ++a) {
             if (active_exit_t[a] < exit_t) { exit_t = active_exit_t[a]; exit_slot = a; }
         }
