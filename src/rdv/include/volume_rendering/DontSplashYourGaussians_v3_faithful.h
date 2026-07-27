@@ -155,8 +155,12 @@ FORWARD {
 
                 int cov_idx = i * 6;
                 vec3 d = x - positions.data[i];
-                float M00=inv_covs.data[cov_idx+0], M01=inv_covs.data[cov_idx+1], M02=inv_covs.data[cov_idx+2];
-                float M11=inv_covs.data[cov_idx+3], M12=inv_covs.data[cov_idx+4], M22=inv_covs.data[cov_idx+5];
+                float M00 = inv_covs.data[cov_idx+0];
+                float M01 = inv_covs.data[cov_idx+1];
+                float M02 = inv_covs.data[cov_idx+2];
+                float M11 = inv_covs.data[cov_idx+3];
+                float M12 = inv_covs.data[cov_idx+4];
+                float M22 = inv_covs.data[cov_idx+5];
 
                 float A = M00*w.x*w.x + M11*w.y*w.y + M22*w.z*w.z
                         + 2.0*(M01*w.x*w.y + M02*w.x*w.z + M12*w.y*w.z);
@@ -201,8 +205,12 @@ FORWARD {
                 int pi = active_idx[a];
                 int cov_idx = pi * 6;
                 vec3 d = x - positions.data[pi];
-                float M00=inv_covs.data[cov_idx+0], M01=inv_covs.data[cov_idx+1], M02=inv_covs.data[cov_idx+2];
-                float M11=inv_covs.data[cov_idx+3], M12=inv_covs.data[cov_idx+4], M22=inv_covs.data[cov_idx+5];
+                float M00 = inv_covs.data[cov_idx+0];
+                float M01 = inv_covs.data[cov_idx+1];
+                float M02 = inv_covs.data[cov_idx+2];
+                float M11 = inv_covs.data[cov_idx+3];
+                float M12 = inv_covs.data[cov_idx+4];
+                float M22 = inv_covs.data[cov_idx+5];
                 float A = M00*w.x*w.x + M11*w.y*w.y + M22*w.z*w.z
                         + 2.0*(M01*w.x*w.y + M02*w.x*w.z + M12*w.y*w.z);
                 float B = M00*w.x*d.x + M11*w.y*d.y + M22*w.z*d.z
@@ -227,8 +235,12 @@ FORWARD {
                     int pi = active_idx[0];
                     int cov_idx = pi * 6;
                     vec3 d = x - positions.data[pi];
-                    float M00=inv_covs.data[cov_idx+0], M01=inv_covs.data[cov_idx+1], M02=inv_covs.data[cov_idx+2];
-                    float M11=inv_covs.data[cov_idx+3], M12=inv_covs.data[cov_idx+4], M22=inv_covs.data[cov_idx+5];
+                    float M00 = inv_covs.data[cov_idx+0];
+                    float M01 = inv_covs.data[cov_idx+1];
+                    float M02 = inv_covs.data[cov_idx+2];
+                    float M11 = inv_covs.data[cov_idx+3];
+                    float M12 = inv_covs.data[cov_idx+4];
+                    float M22 = inv_covs.data[cov_idx+5];
                     float A = M00*w.x*w.x + M11*w.y*w.y + M22*w.z*w.z
                             + 2.0*(M01*w.x*w.y + M02*w.x*w.z + M12*w.y*w.z);
                     float B = M00*w.x*d.x + M11*w.y*d.y + M22*w.z*d.z
@@ -251,8 +263,12 @@ FORWARD {
                             int pi = active_idx[a];
                             int cov_idx = pi * 6;
                             vec3 d = x - positions.data[pi];
-                            float M00=inv_covs.data[cov_idx+0], M01=inv_covs.data[cov_idx+1], M02=inv_covs.data[cov_idx+2];
-                            float M11=inv_covs.data[cov_idx+3], M12=inv_covs.data[cov_idx+4], M22=inv_covs.data[cov_idx+5];
+                            float M00 = inv_covs.data[cov_idx+0];
+                            float M01 = inv_covs.data[cov_idx+1];
+                            float M02 = inv_covs.data[cov_idx+2];
+                            float M11 = inv_covs.data[cov_idx+3];
+                            float M12 = inv_covs.data[cov_idx+4];
+                            float M22 = inv_covs.data[cov_idx+5];
                             float A = M00*w.x*w.x + M11*w.y*w.y + M22*w.z*w.z
                                     + 2.0*(M01*w.x*w.y + M02*w.x*w.z + M12*w.y*w.z);
                             float B = M00*w.x*d.x + M11*w.y*d.y + M22*w.z*d.z
@@ -279,8 +295,12 @@ FORWARD {
                     int pi = active_idx[a];
                     int cov_idx = pi * 6;
                     vec3 d = x - positions.data[pi];
-                    float M00=inv_covs.data[cov_idx+0], M01=inv_covs.data[cov_idx+1], M02=inv_covs.data[cov_idx+2];
-                    float M11=inv_covs.data[cov_idx+3], M12=inv_covs.data[cov_idx+4], M22=inv_covs.data[cov_idx+5];
+                    float M00 = inv_covs.data[cov_idx+0];
+                    float M01 = inv_covs.data[cov_idx+1];
+                    float M02 = inv_covs.data[cov_idx+2];
+                    float M11 = inv_covs.data[cov_idx+3];
+                    float M12 = inv_covs.data[cov_idx+4];
+                    float M22 = inv_covs.data[cov_idx+5];
                     float A = M00*w.x*w.x + M11*w.y*w.y + M22*w.z*w.z
                             + 2.0*(M01*w.x*w.y + M02*w.x*w.z + M12*w.y*w.z);
                     float B = M00*w.x*d.x + M11*w.y*d.y + M22*w.z*d.z
