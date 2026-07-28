@@ -161,9 +161,9 @@ FORWARD {
             float tau_i_arr[ACTIVE_SET_CAP];
 
             for (int a = 0; a < active_count; ++a) {
-                int pi = active_idx[a];
-                int cov_idx = pi * 6;
-                vec3 d = x - positions.data[pi];
+                int piLocal = active_idx[a];
+                int cov_idx = piLocal * 6;
+                vec3 d = x - positions.data[piLocal];
                 float M00 = inv_covs.data[cov_idx+0];
                 float M01 = inv_covs.data[cov_idx+1];
                 float M02 = inv_covs.data[cov_idx+2];
@@ -176,7 +176,7 @@ FORWARD {
                         + M01*(w.x*d.y+w.y*d.x) + M02*(w.x*d.z+w.z*d.x)
                         + M12*(w.y*d.z+w.z*d.y);
                 float t_star = -B / A;
-                float target_alpha = min(opacities.data[pi], 0.999);
+                float target_alpha = min(opacities.data[piLocal], 0.999);
                 float peak_tau = -log(1.0 - target_alpha);
 
                 // tau_i integrated across JUST this segment [t_cursor, event_t]
@@ -195,11 +195,11 @@ FORWARD {
                 vec3 seg_color = vec3(0.0);
 
                 for (int a = 0; a < active_count; ++a) {
-                    int pi = active_idx[a];
+                    int piLocal = active_idx[a];
                     float weight = tau_i_arr[a] / tau_total;
 
-                    vec3 gaussian_color = colors.data[pi] * sh_coefs[0];
-                    int rest_idx = pi * 45;
+                    vec3 gaussian_color = colors.data[piLocal] * sh_coefs[0];
+                    int rest_idx = piLocal * 45;
                     for (int c = 1; c < 16; ++c) {
                         gaussian_color.x += f_rest.data[rest_idx + (c-1)     ] * sh_coefs[c];
                         gaussian_color.y += f_rest.data[rest_idx + (c-1) + 15] * sh_coefs[c];
