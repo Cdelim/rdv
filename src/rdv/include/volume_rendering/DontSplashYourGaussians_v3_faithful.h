@@ -76,8 +76,8 @@ FORWARD {
     const int ACTIVE_SET_CAP = 64;
     const int SAFETY_MAX_ITERS = 4096; 
 
-    int   active_idx[ACTIVE_SET_CAP];
-    float active_exit_t[ACTIVE_SET_CAP];
+    int   active_idx[64];
+    float active_exit_t[64];
     int   active_count = 0;
 
     float xi = random();               
@@ -121,7 +121,7 @@ FORWARD {
                 float B = M00*w.x*d.x + M11*w.y*d.y + M22*w.z*d.z
                         + M01*(w.x*d.y+w.y*d.x) + M02*(w.x*d.z+w.z*d.x)
                         + M12*(w.y*d.z+w.z*d.y);
-                if (A <= 0.000001f) continue;
+                if (A <= 1.0e-6f) continue;
                 float C = M00*d.x*d.x + M11*d.y*d.y + M22*d.z*d.z
                         + 2.0f*(M01*d.x*d.y + M02*d.x*d.z + M12*d.y*d.z);
 
@@ -131,7 +131,7 @@ FORWARD {
                 float t_enter = (-B - sq) / A;
                 float t_exit  = (-B + sq) / A;
                 if (t_exit <= t_cursor) continue;      
-                float this_entry = max(t_enter, t_cursor + 0.00001f);
+                float this_entry = max(t_enter, t_cursor + 1.0e-5f);
                 if (this_entry < new_entry_t) {
                     new_entry_t = this_entry; new_idx = i;
                     new_A = A; new_B = B; new_C = C;
@@ -155,9 +155,9 @@ FORWARD {
         if (active_count > 0) {
             float seg_ratio = 1.0f;
             for (int a = 0; a < active_count; ++a) {
-                int pi = active_idx[a];
-                int cov_idx = pi * 6;
-                vec3 d = x - positions.data[pi];
+                int piLoc = active_idx[a];
+                int cov_idx = piLoc * 6;
+                vec3 d = x - positions.data[piLoc];
                 float M00 = inv_covs.data[cov_idx+0];
                 float M01 = inv_covs.data[cov_idx+1];
                 float M02 = inv_covs.data[cov_idx+2];
@@ -170,7 +170,7 @@ FORWARD {
                         + M01*(w.x*d.y+w.y*d.x) + M02*(w.x*d.z+w.z*d.x)
                         + M12*(w.y*d.z+w.z*d.y);
                 float t_star = -B / A;
-                float target_alpha = min(opacities.data[pi], 0.999f);
+                float target_alpha = min(opacities.data[piLoc], 0.999f);
                 float peak_tau = -log(1.0f - target_alpha);
                 float u_lo = (t_cursor - t_star) * sqrt(A);
                 float u_hi = (event_t   - t_star) * sqrt(A);
@@ -183,9 +183,9 @@ FORWARD {
             if (xi >= T_after) {
                 float t_hit;
                 if (active_count == 1) {
-                    int pi = active_idx[0];
-                    int cov_idx = pi * 6;
-                    vec3 d = x - positions.data[pi];
+                    int piLoc = active_idx[0];
+                    int cov_idx = piLoc * 6;
+                    vec3 d = x - positions.data[piLoc];
                     float M00 = inv_covs.data[cov_idx+0];
                     float M01 = inv_covs.data[cov_idx+1];
                     float M02 = inv_covs.data[cov_idx+2];
@@ -198,10 +198,10 @@ FORWARD {
                             + M01*(w.x*d.y+w.y*d.x) + M02*(w.x*d.z+w.z*d.x)
                             + M12*(w.y*d.z+w.z*d.y);
                     float t_star = -B / A;
-                    float target_alpha = min(opacities.data[pi], 0.999f);
+                    float target_alpha = min(opacities.data[piLoc], 0.999f);
                     float peak_tau = -log(1.0f - target_alpha);
                     float target = xi / T_cum;
-                    float uu = clamp(1.0f - log(target) / (-peak_tau), 0.000001f, 1.0f - 0.000001f);
+                    float uu = clamp(1.0f - log(target) / (-peak_tau), 1.0e-6f, 0.999999f);
                     t_hit = t_star + probit(uu) / sqrt(A);
                 } else {
                     float lo = t_cursor;  
@@ -210,9 +210,9 @@ FORWARD {
                         float mid = 0.5f * (lo + hi);
                         float ratio = 1.0f;
                         for (int a = 0; a < active_count; ++a) {
-                            int pi = active_idx[a];
-                            int cov_idx = pi * 6;
-                            vec3 d = x - positions.data[pi];
+                            int piLoc = active_idx[a];
+                            int cov_idx = piLoc * 6;
+                            vec3 d = x - positions.data[piLoc];
                             float M00 = inv_covs.data[cov_idx+0];
                             float M01 = inv_covs.data[cov_idx+1];
                             float M02 = inv_covs.data[cov_idx+2];
@@ -225,7 +225,7 @@ FORWARD {
                                     + M01*(w.x*d.y+w.y*d.x) + M02*(w.x*d.z+w.z*d.x)
                                     + M12*(w.y*d.z+w.z*d.y);
                             float t_star = -B / A;
-                            float target_alpha = min(opacities.data[pi], 0.999f);
+                            float target_alpha = min(opacities.data[piLoc], 0.999f);
                             float peak_tau = -log(1.0f - target_alpha);
                             float u_lo2 = (t_cursor - t_star) * sqrt(A);
                             float u_m   = (mid       - t_star) * sqrt(A);
@@ -241,9 +241,9 @@ FORWARD {
                 float local_w[64];
                 float total_w = 0.0f;
                 for (int a = 0; a < active_count; ++a) {
-                    int pi = active_idx[a];
-                    int cov_idx = pi * 6;
-                    vec3 d = x - positions.data[pi];
+                    int piLoc = active_idx[a];
+                    int cov_idx = piLoc * 6;
+                    vec3 d = x - positions.data[piLoc];
                     float M00 = inv_covs.data[cov_idx+0];
                     float M01 = inv_covs.data[cov_idx+1];
                     float M02 = inv_covs.data[cov_idx+2];
@@ -256,13 +256,13 @@ FORWARD {
                             + M01*(w.x*d.y+w.y*d.x) + M02*(w.x*d.z+w.z*d.x)
                             + M12*(w.y*d.z+w.z*d.y);
                     float t_star = -B / A;
-                    float target_alpha = min(opacities.data[pi], 0.999f);
+                    float target_alpha = min(opacities.data[piLoc], 0.999f);
                     float peak_tau = -log(1.0f - target_alpha);
                     float sigma_peak = peak_tau * sqrt(A / 6.283185307f);
                     local_w[a] = sigma_peak * exp(-0.5f * A * (t_hit - t_star) * (t_hit - t_star));
                     total_w += local_w[a];
                 }
-                float r = random() * max(total_w, 0.000000000001f);
+                float r = random() * max(total_w, 1.0e-12f);
                 float acc = 0.0f;
                 int winner = active_idx[0];
                 for (int a = 0; a < active_count; ++a) {
