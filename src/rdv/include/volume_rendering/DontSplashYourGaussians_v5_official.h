@@ -82,7 +82,7 @@ FORWARD {
     eval_sh(w, sh_coefs);
 
     const float K_SIGMA = 3.0;   // matches their default ellipsoid shell extent
-    const int   MAX_DEPTH = 128; // their render_3dg_asset.py / refine_3dg_dataset.py
+    const int   MAX_DEPTH = 14; // their render_3dg_asset.py / refine_3dg_dataset.py
                                   // setting; a real quality knob (paper's "Maximum
                                   // Primitive Depth" ablation), not a safety bound
 
