@@ -57,7 +57,7 @@ from ._gaussian_splats_sampled import *
 from ._gaussian_splats_sampled_density import *
 from ._dont_splash_your_gaussians_v4_vprf import *
 from ._dont_splash_your_gaussians_v5_offical import *
-from _gaussian_splats_sun2025 import *
+from ._gaussian_splats_sun2025 import *
 # (
 #     CameraProbes,
 #     Geometry,

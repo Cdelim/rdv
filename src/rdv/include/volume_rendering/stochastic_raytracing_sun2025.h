@@ -118,10 +118,20 @@ FORWARD {
     vec3 x = vec3(_input[0], _input[1], _input[2]);
     vec3 w = normalize(vec3(_input[3], _input[4], _input[5]));
 
+
+
+    uint b1 = floatBitsToUint(w.x);
+    uint b2 = floatBitsToUint(w.y);
+    uint b3 = floatBitsToUint(w.z);
+    uint seed = b1 ^ (b2 * 1973u) ^ (b3 * 9277u);
+    rdv_rng_state = uvec4(seed, seed * 1664525u, ~seed, seed ^ 0x23F1u);
+    random_step(); random_step();
+
     // Their hash is position-dependent and must still decorrelate across the
     // sensor's samples-per-pixel (their Sec. 4.2 perturbs the hit position
     // with a frame-dependent quasi-random offset for exactly this reason).
     // This framework's stateful random() supplies that per-sample offset.
+    
     vec3 jitter = vec3(random(), random(), random()) * 1024.0;
 
     float sh_coefs[16];
@@ -129,7 +139,7 @@ FORWARD {
 
     // Their Eq. 2 support radius: s = 2*sqrt(2), so Mahalanobis^2 <= 8,
     // and since Mahalanobis^2 at the peak == -2*power, this is power >= -4.
-    const float POWER_CUTOFF = -4.0;
+    float POWER_CUTOFF = -4.0;
 
     rayQueryEXT rq;
     rayQueryInitializeEXT(rq, accelerationStructureEXT(parameters.ads),
@@ -187,12 +197,12 @@ FORWARD {
 
             // --- Alg. 1 lines 10-14: Russian Roulette on opacity ---
             vec3 p_hit = x + t_hit * w;
-            float xi = sun_hash(p_hit + jitter);
+            float xi_val = sun_hash(p_hit + jitter);
             float alpha = min(opacities.data[i] * exp(power), 0.9999);
 
             // ACCEPT if xi < alpha -- per their Eq. 4 and Fig. 2.
             // (Their Alg. 1 line 12 reads inverted; see header note.)
-            if (xi < alpha) {
+            if (xi_val < alpha) {
                 // --- Alg. 1 line 15: report + clip ray (r.tmax <- t) ---
                 rayQueryGenerateIntersectionEXT(rq, t_hit);
             }
@@ -208,10 +218,9 @@ FORWARD {
 
     if (rayQueryGetIntersectionTypeEXT(rq, true) ==
         gl_RayQueryCommittedIntersectionGeneratedEXT) {
-
-        int pi = rayQueryGetIntersectionPrimitiveIndexEXT(rq, true);
-        vec3 gaussian_color = colors.data[pi] * sh_coefs[0];
-        int rest_idx = pi * 45;
+        int piLocal = rayQueryGetIntersectionPrimitiveIndexEXT(rq, true);
+        vec3 gaussian_color = colors.data[piLocal] * sh_coefs[0];
+        int rest_idx = piLocal * 45;
         for (int c = 1; c < 16; ++c) {
             gaussian_color.x += f_rest.data[rest_idx + (c-1)     ] * sh_coefs[c];
             gaussian_color.y += f_rest.data[rest_idx + (c-1) + 15] * sh_coefs[c];
