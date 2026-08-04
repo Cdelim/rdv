@@ -139,6 +139,7 @@ FORWARD {
                     // alpha: opacity * exp(power) evaluated at THIS primitive's
                     // own peak -- their eval_transmission, our A/B/C form
                     float power = -0.5 * (C - (B*B)/A);
+                    power = min(power, 0.0);   // their eval_transmission clamps to [0,inf)
                     float alpha = min(opacities.data[i] * exp(power), 0.9999);
                     best_entry_t = t_enter;
                     best_idx = i;

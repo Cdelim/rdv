@@ -107,9 +107,11 @@ FORWARD {
     uint b1 = floatBitsToUint(w.x);
     uint b2 = floatBitsToUint(w.y);
     uint b3 = floatBitsToUint(w.z);
-    uint seed = b1 ^ (b2 * 1973u) ^ (b3 * 9277u);
-    rdv_rng_state = uvec4(seed, seed * 1664525u, ~seed, seed ^ 0x23F1u);
+
     random_step(); random_step();
+    rdv_rng_state = random_seed();
+
+    const float K_SIGMA = 3.0;   // matches their default ellipsoid shell extent
 
     float sh_coefs[16];
     eval_sh(w, sh_coefs);
@@ -151,6 +153,8 @@ FORWARD {
                     + M01*(w.x*d.y+w.y*d.x) + M02*(w.x*d.z+w.z*d.x)
                     + M12*(w.y*d.z+w.z*d.y);
 
+            
+
             if (A > 1e-6) {
                 // true analytic peak -- see header note on why this replaces
                 // the original file's dot-product t_proj
@@ -165,13 +169,16 @@ FORWARD {
                 float C = M00*d.x*d.x + M11*d.y*d.y + M22*d.z*d.z
                         + 2.0*(M01*d.x*d.y + M02*d.x*d.z + M12*d.y*d.z);
 
+                float disc = B*B - A*(C - K_SIGMA*K_SIGMA);
+                if (disc < 0.0) continue;       
+
                 //What it does: The math (C - (B*B)/A) calculates how close the ray actually gets to the physical center of the 3D Gaussian at its closest approach.
                 //power: Calculates the exponent for the density.
                 //The if statement: If power < -15.0, the ray passed so far away from the center that the fog is microscopically thin, so it ignores it. 
                 //(Notice this is much more generous than Sun's -4.0 cutoff!).
                 float power = -0.5 * (C - (B*B)/A);
-
-                if (power > -15.0 && power <= 0.0) {
+                power = min(power, 0.0);
+                if (power > -15.0) {
 
                     //This is the core physics math. A standard 3DGS rasterizer just treats opacity (target_alpha) like a piece of tinted glass. 
                     //But true volumetric ray tracing treats it like a cloud of particles.
@@ -186,7 +193,7 @@ FORWARD {
                     float alpha     = 1.0 - exp(-exact_tau);
 
                     // --- 1. does this Gaussian interact at all? (same test as before) ---
-                    if (random() < alpha) {
+                    if (random() <= alpha) {
 
                         // --- 2. WHERE does it interact? sample from its OWN density
                         //        instead of always using t_star. This is the fix. ---
