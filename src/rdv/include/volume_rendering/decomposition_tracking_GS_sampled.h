@@ -119,7 +119,7 @@ FORWARD {
 
     rayQueryEXT rq;
     rayQueryInitializeEXT(rq, accelerationStructureEXT(parameters.ads),
-        gl_RayFlagsOpaqueEXT, 0xFF, x, 0.0, w, 10000.0);
+        gl_RayFlagsNoneEXT, 0xFF, x, 0.0, w, 10000.0);
 
     while (rayQueryProceedEXT(rq)) {
         if (rayQueryGetIntersectionTypeEXT(rq, false) ==
@@ -135,9 +135,18 @@ FORWARD {
             float M11 = inv_covs.data[cov_idx + 3];
             float M12 = inv_covs.data[cov_idx + 4];
             float M22 = inv_covs.data[cov_idx + 5];
+            
 
+            //The Math: $A = w^T \Sigma^{-1} w$
+            //What it does: It multiplies the ray's direction vector (w) by the shape matrix (M). 
+            //This tells you how sharply the Gaussian is squished specifically along the direction you are looking.
             float A = M00*w.x*w.x + M11*w.y*w.y + M22*w.z*w.z
                     + 2.0*(M01*w.x*w.y + M02*w.x*w.z + M12*w.y*w.z);
+
+            //The Math: $B = w^T \Sigma^{-1} d
+            //What it does: d is the distance vector from the camera to the Gaussian. w is the ray direction. 
+            //This cross-multiplies them both through the shape matrix. It measures how the ray's path aligns with the offset of the Gaussian.
+
             float B = M00*w.x*d.x + M11*w.y*d.y + M22*w.z*d.z
                     + M01*(w.x*d.y+w.y*d.x) + M02*(w.x*d.z+w.z*d.x)
                     + M12*(w.y*d.z+w.z*d.y);
@@ -145,13 +154,32 @@ FORWARD {
             if (A > 1e-6) {
                 // true analytic peak -- see header note on why this replaces
                 // the original file's dot-product t_proj
+                //The derivative of $A t^2 + 2B t + C$ is $2A t + 2B = 0$.
+                //Solve for $t$, and you get exactly $t = -B / A$.
                 float t_star = -B / A;
+                
 
+                //The Math: $C = d^T \Sigma^{-1} d$
+                //What it does: This multiplies the camera-to-Gaussian distance (d) against itself through the shape matrix. 
+                //It acts as the baseline starting distance (the Mahalanobis distance from the camera to the center of the Gaussian).
                 float C = M00*d.x*d.x + M11*d.y*d.y + M22*d.z*d.z
                         + 2.0*(M01*d.x*d.y + M02*d.x*d.z + M12*d.y*d.z);
+
+                //What it does: The math (C - (B*B)/A) calculates how close the ray actually gets to the physical center of the 3D Gaussian at its closest approach.
+                //power: Calculates the exponent for the density.
+                //The if statement: If power < -15.0, the ray passed so far away from the center that the fog is microscopically thin, so it ignores it. 
+                //(Notice this is much more generous than Sun's -4.0 cutoff!).
                 float power = -0.5 * (C - (B*B)/A);
 
                 if (power > -15.0 && power <= 0.0) {
+
+                    //This is the core physics math. A standard 3DGS rasterizer just treats opacity (target_alpha) like a piece of tinted glass. 
+                    //But true volumetric ray tracing treats it like a cloud of particles.
+                    //peak_tau: It takes the raw opacity and uses -log() to convert it into Optical Depth ($\tau$). 
+                    //Optical depth is a physics term measuring how much physical "stuff" (particles) is actually floating in that space.
+                    //exact_tau: Multiplies the total "stuff" by the exp(power) density dropoff. 
+                        //This gives the exact amount of "stuff" the ray will pass through on its specific path.
+                    //alpha: Converts that "stuff" back into a percentage probability (1.0 - exp(-exact_tau)).
                     float target_alpha = min(opacities.data[i], 0.999);
                     float peak_tau  = -log(1.0 - target_alpha);
                     float exact_tau = peak_tau * exp(power);
@@ -162,11 +190,27 @@ FORWARD {
 
                         // --- 2. WHERE does it interact? sample from its OWN density
                         //        instead of always using t_star. This is the fix. ---
-                        float u = clamp(random(), 1e-6, 1.0 - 1e-6);
-                        float t_sample = t_star + probit(u) / sqrt(A);
+                        //float u = clamp(random(), 1e-6, 1.0 - 1e-6);
 
-                        if (t_sample > 0.0 && t_sample < closest_t) {
-                            closest_t = t_sample;
+
+
+                        //This is the most important part of this specific shader.
+                        //Instead of forcing the photon to stop exactly at t_star (which looks ghostly and wrong, as you saw in the Sun et al. render), 
+                        //it scatters the hit dynamically!
+
+                        //u: Rolls a brand new random number.
+
+                        //probit(u): This is an advanced statistical function (the inverse cumulative distribution function of a normal curve). 
+                        //If u is 0.5, probit returns 0. If u is 0.1, it returns a negative number. If u is 0.9, it returns a positive number.
+
+                        //t_sample: It takes the peak (t_star) and pushes the hit location slightly forward or backward based on the probit function and the width of the Gaussian (sqrt(A)).
+                        //float t_sample = t_star + probit(u) / sqrt(A);
+                        float t_sample = t_star + random_normal()/ sqrt(A);
+
+                        if (t_sample > 0.0 && t_sample < rayQueryGetIntersectionTEXT(rq, true)) {
+                            //closest_t = t_sample;
+
+                            rayQueryGenerateIntersectionEXT(rq, t_sample);
 
                             vec3 gaussian_color = colors.data[i] * sh_coefs[0];
                             int rest_idx = i * 45;
