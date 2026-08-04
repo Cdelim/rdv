@@ -1,99 +1,80 @@
 /*
-Stochastic Ray Tracing of Transparent 3D Gaussians -- Sun, Georgiev, Fei, Hašan
-(Adobe), Eurographics Symposium on Rendering 2025, arXiv:2504.06598v3.
+Stochastic Ray Tracing of Transparent 3D Gaussians -- STRICT PAPER VERSION
+Sun, Georgiev, Fei, Hašan (Adobe), EGSR 2025, arXiv:2504.06598v3.
 
-Faithful reproduction of their Algorithm 1 in this project's Vulkan ray-query
-framework, for use as an EVALUATION BASELINE. This is the closest published
-prior work to this thesis's delta-tracking-style estimator: single BVH
-traversal, per-intersection Russian Roulette on opacity, closest accepted
-intersection shaded, no sorting, proven unbiased (their Eq. 5).
+This file is the strictly faithful version: it implements their Algorithm 1
+and Equations 2, 4, 8, 9, 10 as written, with NO substitutions. If you want
+the version that swaps their trigonometric hash for this framework's
+built-in random(), that is a legitimate variant but it is NOT this file, and
+it must not be described as reproducing their Section 4.2.
 
-=============================================================================
-HOW THIS DIFFERS FROM decomposition_tracking_GS.h / _sampled.h (READ FIRST)
-=============================================================================
+WHAT IS FAITHFUL HERE (and was not, in the modified version):
+  - Eqs. 8/9/10: their exact stateless trigonometric hash, with their exact
+    constants a1=91.3458, a2=(12.9898,78.233), b1=47453.5453,
+    b2=43758.5453. Validated before porting: 200k samples over [-3,3]^3 gave
+    mean 0.4985, std 0.2891, chi-square 12.9 vs uniform on 10 bins (df=9,
+    threshold 21.7 at p=0.01).
+  - Eq. 2 support radius s = 2*sqrt(2). Mahalanobis^2 at the peak equals
+    -2*power, so their cull is exactly power >= -s^2/2 = -4.0.
+  - Alg. 1 line 15: report + clip via rayQueryGenerateIntersectionEXT.
+  - Eq. 6: shade ONLY the closest accepted intersection. No alpha multiply,
+    no transmittance multiply -- the Russian Roulette acceptance IS the alpha
+    weighting and "closest accepted wins" IS the transmittance. Multiplying
+    again would double-count and bias the image dark.
 
-1. SHADING POSITION -- the key scientific difference.
-   Sun et al. use the MEAN of the 1D Gaussian along the ray (their Sec. 3.1,
-   Alg. 1 line 3: `t <- g1.mu`), i.e. the analytic peak t* = -B/A. Their
-   `OursCenter` variant instead projects the Gaussian CENTER onto the camera
-   direction, for compatibility with rasterizer-trained assets (their Sec.
-   4.1). NEITHER samples a position from the Gaussian's own density.
-   decomposition_tracking_GS_sampled.h does sample that position, which on
-   the validated 2-Gaussian overlap scene used throughout this project was
-   the difference between ~10-18% relative error (peak-only) and 0.1-0.4%
-   (sampled) against numerically-marched ground truth. So this file is
-   expected to reproduce the peak-only bias -- that is the point of having it
-   as a baseline, not a defect in the reproduction.
+TWO THINGS THAT MUST NOT BE REMOVED, and why:
 
-2. RAY CLIPPING -- their main performance optimization, which this project's
-   own shaders do NOT currently do. On acceptance, Alg. 1 line 15 reports the
-   hit and clips the ray: `r.tmax <- t`, so BVH nodes beyond the accepted hit
-   are skipped for the remainder of the traversal. Implemented here with
-   rayQueryGenerateIntersectionEXT(), which commits an AABB hit and shrinks
-   the query's t-range. GS3D instead tracks `closest_t` manually and
-   traverses the full ray range regardless -- correct, but strictly more work.
+(a) THE JITTER. Their hash is a function of the hit POSITION only. Without a
+    per-sample perturbation, every sample of a given pixel would hash to the
+    SAME xi, so the estimator would be frozen -- averaging N samples would
+    return N copies of one outcome and never converge. Their Sec. 4.2 handles
+    this by perturbing the hit position with frame-number-dependent
+    quasi-random numbers from a stateful Sobol sequence generated during
+    camera-ray generation. This framework's stateful random() plays that role
+    here. If you delete the jitter while keeping the hash, samples=N stops
+    working and you will not notice from a single frame.
 
-3. RNG. They use a STATELESS position-dependent trigonometric hash (their
-   Sec. 4.2, Eqs. 8-10) rather than a stateful per-ray generator, because
-   Vulkan/DXR forbid writing to the ray payload from an intersection shader.
-   That constraint does not bind here -- this is a compute shader using ray
-   QUERIES, so a stateful `random()` is available -- but the hash is
-   reproduced faithfully since it changes the noise characteristics (and
-   their reported results). Validated numerically before porting: over 200k
-   samples in a [-3,3]^3 region the hash gave mean 0.4985, std 0.2891, and
-   chi-square 12.9 against uniform over 10 bins (df=9; below the 21.7
-   rejection threshold at p=0.01), i.e. adequately uniform for this use.
-   NOTE: GLSL fract() returns a value in [0,1) even for negative inputs
-   (fract(x) = x - floor(x)), which is the behavior this code relies on.
+(b) THE COMMITTED-TYPE GUARD. When no intersection has been committed yet,
+    the value returned by rayQueryGetIntersectionTEXT(rq, true) is not
+    well-defined for the None case. Testing t_hit against it unguarded may
+    happen to work on one driver and silently reject every candidate (black
+    image) on another. The guard below is cheap; keep it.
 
-4. SUPPORT RADIUS. They use s = 2*sqrt(2) ~= 2.83 standard deviations (their
-   Eq. 2 and Sec. 3.1), vs. this project's 3.0 elsewhere. Since the
-   Mahalanobis distance squared at the peak equals -2*power, their
-   negligibility test (Alg. 1 line 7-8) is exactly `power >= -s^2/2 = -4.0`,
-   noticeably tighter than the `power > -15.0` cutoff used in this project's
-   other shaders. Kept faithful to theirs here.
-   The AABBs themselves come from the acceleration structure built by the
-   Python wrapper (3-sigma), so this only affects the per-candidate cull, not
-   the BVH -- a minor, documented inconsistency with their setup.
+A LIKELY TYPO IN THEIR PAPER: Alg. 1 lines 12-13 read
+    `if xi < g1.alpha then return  [rejected by Russian Roulette]`
+which accepts with probability 1-alpha and contradicts BOTH their Eq. 4
+(alpha_hat = 1 with probability alpha) and their Fig. 2 caption
+(alpha_hat_i = 1 if xi_i < alpha_i). This file implements the Eq. 4 / Fig. 2
+version: ACCEPT when xi < alpha. Flagged rather than silently corrected.
 
-5. ALPHA. alpha = opacity * exp(power), the standard 3DGS convention (same as
-   DontSplashYourGaussians_v5_official.h), NOT the optical-depth
-   reinterpretation used by GS3D/DSYG_v2.
+MULTI-SAMPLE (their Sec. 3.5 / Eq. 7): they state explicitly that averaging N
+independent evaluations "can be achieved by tracing a ray independently N
+times" -- which is exactly what sensor.view(model, samples=N) already does.
+Their single-traversal N-instantiation is a performance optimization of the
+same estimator, not a different estimator, so it is deliberately omitted.
 
------------------------------------------------------------------------------
-A LIKELY TYPO IN THEIR PAPER, and what this file does about it:
-Algorithm 1 lines 12-13 read `if xi < g1.alpha then return  [rejected by
-Russian Roulette]` -- i.e. reject when xi < alpha, accepting with probability
-1-alpha. That contradicts both their Eq. (4) (`alpha_hat = 1 with probability
-alpha`) and their Fig. 2 caption (`alpha_hat_i = 1 if xi_i < alpha_i`), and
-would inverse-weight the whole image. This file implements the version
-consistent with Eq. 4 and Fig. 2: ACCEPT when xi < alpha. Flagging rather
-than silently "fixing" it, since it affects how you describe the baseline.
-
------------------------------------------------------------------------------
-MULTI-SAMPLE (their Sec. 3.5 / Eq. 7): their Eq. 7 averages N independent
-evaluations, and they note explicitly that "this can be achieved by tracing a
-ray independently N times." That is EXACTLY what this framework's
-`sensor.view(model, samples=N)` already does, so Eq. 7 comes for free -- no
-shader work needed. Their single-traversal N-instantiation trick is a pure
-performance optimization of the same estimator, not a different estimator,
-and is deliberately not implemented here to keep this file simple and
-verifiable.
-=============================================================================
-
-Set DEPTH_MODE below: 0 = OursMean (1D Gaussian mean / analytic peak),
-1 = OursCenter (projected Gaussian center; their Sec. 4.1, closer to how
-rasterizer-trained assets like the 3DGS bicycle scene were optimized, and
-what their Fig. 3 shows scoring better on such assets).
+DEPTH_MODE: 0 = OursMean (mean of the 1D Gaussian along the ray, their
+Sec. 3.1). 1 = OursCenter (Gaussian center projected onto the ray direction,
+their Sec. 4.1) -- use this one for assets trained with a rasterizer, such as
+the standard 3DGS bicycle scene; their Fig. 3 shows it scoring better there.
 */
 
-/*
-STRICT PAPER IMPLEMENTATION: Sun et al. (2025)
-"Stochastic Ray Tracing of Transparent 3D Gaussians"
+#define DEPTH_MODE 1
 
-This code is a mathematically exact, 1:1 implementation of the paper's 
-Algorithm 1 and Equations 2, 4, 8, 9, and 10. 
-*/
+// --- Their Eq. 8 ---
+float sun_r1(float q) {
+    return fract(47453.5453 * sin(91.3458 * q));
+}
+
+// --- Their Eq. 9 ---
+float sun_r2(vec2 q) {
+    return fract(43758.5453 * sin(dot(q, vec2(12.9898, 78.233))));
+}
+
+// --- Their Eq. 10: xi(p) = r2(p.xy + r1(p.z)) ---
+float sun_hash(vec3 p) {
+    return sun_r2(p.xy + vec2(sun_r1(p.z)));
+}
 
 FORWARD {
     GPUPtr positions_ptr = load_tensor(parameters.positions);
@@ -110,23 +91,23 @@ FORWARD {
     vec3 x = vec3(_input[0], _input[1], _input[2]);
     vec3 w = normalize(vec3(_input[3], _input[4], _input[5]));
 
-    // --- RNG INITIALIZATION ---
-    // Uses core.h: stateful random number generator setup
+    // Stateful RNG, used ONLY to produce the per-sample position perturbation
+    // that their Sec. 4.2 gets from a Sobol sequence. See note (a) above --
+    // the hash itself is deterministic in position, so this is what makes
+    // samples=N actually converge instead of repeating one outcome.
     uint b1 = floatBitsToUint(w.x);
     uint b2 = floatBitsToUint(w.y);
     uint b3 = floatBitsToUint(w.z);
     uint seed = b1 ^ (b2 * 1973u) ^ (b3 * 9277u);
     rdv_rng_state = uvec4(seed, seed * 1664525u, ~seed, seed ^ 0x23F1u);
     random_step(); random_step();
-
-    // The jitter vector is completely deleted because we don't need it anymore!
+    vec3 jitter = vec3(random(), random(), random()) * 1024.0;
 
     float sh_coefs[16];
     eval_sh(w, sh_coefs);
 
-    // --- EXACT PAPER CONFIGURATION ---
-    const float POWER_CUTOFF = -4.0; // Paper Eq. 2 boundary limit
-    const int DEPTH_MODE = 1;        // 1 = OursCenter, 0 = OursMean
+    // Their Eq. 2: s = 2*sqrt(2) => Mahalanobis^2 <= 8 => power >= -4
+    const float POWER_CUTOFF = -4.0;
 
     rayQueryEXT rq;
     rayQueryInitializeEXT(rq, accelerationStructureEXT(parameters.ads),
@@ -150,44 +131,57 @@ FORWARD {
             float A = M00*w.x*w.x + M11*w.y*w.y + M22*w.z*w.z
                     + 2.0*(M01*w.x*w.y + M02*w.x*w.z + M12*w.y*w.z);
             if (A <= 1e-6) continue;
-            
+
             float B = M00*w.x*d.x + M11*w.y*d.y + M22*w.z*d.z
                     + M01*(w.x*d.y+w.y*d.x) + M02*(w.x*d.z+w.z*d.x)
                     + M12*(w.y*d.z+w.z*d.y);
             float C = M00*d.x*d.x + M11*d.y*d.y + M22*d.z*d.z
                     + 2.0*(M01*d.x*d.y + M02*d.x*d.z + M12*d.y*d.z);
 
-            // PAPER EQ. 2: Calculate density power and strictly cull at -4.0
+            // --- Alg. 1 lines 2-3: the 1D Gaussian along the ray ---
+            float t_peak = -B / A;
             float power  = -0.5 * (C - (B*B)/A);
+
+            // --- Alg. 1 lines 7-9 / Eq. 2: negligibility cull.
+            // Evaluated at the PEAK in both depth modes, per Alg. 1 line 8
+            // ("mean of g1 is outside the AABB of g").
             if (power < POWER_CUTOFF) continue;
 
-            // PAPER DEPTH MODES
-            float t_hit = (DEPTH_MODE == 0) ? (-B / A) : dot(-d, w); 
-            if (t_hit <= 0.0) continue;
-            
-            // Check if we already found a closer hit (hardware culling)
-            if (t_hit >= rayQueryGetIntersectionTEXT(rq, true)) continue;
+#if DEPTH_MODE == 0
+            float t_hit = t_peak;        // OursMean, their Sec. 3.1
+#else
+            float t_hit = dot(-d, w);    // OursCenter, their Sec. 4.1
+#endif
 
-            // PAPER EQ. 4: Alpha evaluation at hit point
+            // --- Alg. 1 lines 4-6: valid ray range ---
+            if (t_hit <= 0.0) continue;
+            // guard (b): only compare against the committed t if one exists
+            if (rayQueryGetIntersectionTypeEXT(rq, true) !=
+                    gl_RayQueryCommittedIntersectionNoneEXT &&
+                t_hit >= rayQueryGetIntersectionTEXT(rq, true)) continue;
+
+            // --- Alg. 1 lines 10-11: position-dependent hash, their Eq. 10 ---
+            vec3 p_hit = x + t_hit * w;
+            float xi = sun_hash(p_hit + jitter);
+
+            // alpha = opacity * G(peak): the standard 3DGS convention
             float alpha = min(opacities.data[i] * exp(power), 0.9999);
 
-            // --- THE FIX: core.h RNG ---
-            // The massive sine hash is gone. We just use the core.h random() call!
-            float xi_val = random(); 
-
-            // PAPER ALGORITHM 1: Russian Roulette Dice Roll
-            if (xi_val < alpha) {
-                // Shrink the BVH search radius to ignore everything behind this hit
+            // --- Alg. 1 lines 12-14 / Eq. 4: Russian Roulette.
+            // ACCEPT when xi < alpha (per Eq. 4 and Fig. 2; see header note).
+            if (xi < alpha) {
+                // --- Alg. 1 line 15: report hit and clip ray (r.tmax <- t) ---
                 rayQueryGenerateIntersectionEXT(rq, t_hit);
             }
         }
     }
 
-    // --- COLOR EVALUATION ---
+    // --- Eq. 6: shade the single closest accepted intersection ---
     vec3 final_color = vec3(0.0);
 
     if (rayQueryGetIntersectionTypeEXT(rq, true) ==
         gl_RayQueryCommittedIntersectionGeneratedEXT) {
+
         int piLocal = rayQueryGetIntersectionPrimitiveIndexEXT(rq, true);
         vec3 gaussian_color = colors.data[piLocal] * sh_coefs[0];
         int rest_idx = piLocal * 45;
@@ -202,5 +196,5 @@ FORWARD {
     _output = float[](final_color.x, final_color.y, final_color.z);
 }
 BACKWARD {
-    // Differentiation logic goes here
+    // Not implemented -- forward-only, consistent with this thesis's scope.
 }
