@@ -141,7 +141,7 @@ FORWARD {
             // --- Alg. 1 lines 2-3: the 1D Gaussian along the ray ---
             float t_peak = -B / A;
             float power  = -0.5 * (C - (B*B)/A);
-
+            power = min(power, 0.0);   
             // --- Alg. 1 lines 7-9 / Eq. 2: negligibility cull.
             // Evaluated at the PEAK in both depth modes, per Alg. 1 line 8
             // ("mean of g1 is outside the AABB of g").
