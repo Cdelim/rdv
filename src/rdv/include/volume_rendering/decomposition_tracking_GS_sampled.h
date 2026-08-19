@@ -229,7 +229,30 @@ FORWARD {
                         // float u = PHI_LO + random() * (PHI_HI - PHI_LO);
                         // float t_sample = t_star + probit(u) / sqrt(A);
                         //float t_sample = t_star + probit(u) / sqrt(A);
-                        float t_sample = t_star + random_normal() * sqrt(A);
+                        //float t_sample = t_star + random_normal() * sqrt(A);
+                        // 1. Generate a Standard Normal bell curve (Box-Muller transform)
+                        float u1 = max(1e-10, random());
+                        float u2 = random();
+                        float r = sqrt(-2.0 * log(u1));
+                        float theta = 2.0 * 3.14159265359 * u2;
+                        float normal_noise = r * cos(theta);
+
+                        // 2. TRUNCATE: Force the noise to stay within 2 standard deviations.
+                        // This stops the extreme 5% of outliers from scattering way outside the core.
+                        normal_noise = clamp(normal_noise, -2.0, 2.0);
+
+                        // 3. Calculate the true physical width (1-sigma) of the Gaussian along the ray
+                        float true_sigma = 1.0 / sqrt(A);
+
+                        // 4. THE THICKNESS CAP: This fixes the grazing angle ghosting!
+                        // We cap the standard deviation at 0.05 (roughly 5 centimeters).
+                        // - Head-on hit: true_sigma is tiny (e.g., 0.005). The clamp does nothing. True physics!
+                        // - Grazing hit: true_sigma is huge (e.g., 0.600). The clamp snaps it to 0.05. Sharp surface!
+                        float clamped_sigma = min(true_sigma, 0.05);
+
+                        // 5. Calculate the final hit point using the protected math
+                        //float t_sample = t_star + (normal_noise * clamped_sigma);
+                        float t_sample = t_star;
 
                         if (t_sample > 0.0 && t_sample < rayQueryGetIntersectionTEXT(rq, true)) {
                             //closest_t = t_sample;
