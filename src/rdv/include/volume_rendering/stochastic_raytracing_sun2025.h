@@ -95,11 +95,21 @@ FORWARD {
     // that their Sec. 4.2 gets from a Sobol sequence. See note (a) above --
     // the hash itself is deterministic in position, so this is what makes
     // samples=N actually converge instead of repeating one outcome.
+    
     uint b1 = floatBitsToUint(w.x);
     uint b2 = floatBitsToUint(w.y);
     uint b3 = floatBitsToUint(w.z);
+    
+    // 2. Smash them together to create a 100% unique seed per pixel
+    uint seed = b1 ^ (b2 * 1973u) ^ (b3 * 9277u);
+    
+    // 3. Load the seed into the engine state
+    rdv_rng_state = uvec4(seed, seed * 1664525u, ~seed, seed ^ 0x23F1u);
+    
+    // 4. "Warm up" the engine so the first outputs aren't correlated
     random_step(); random_step();
-    rdv_rng_state = random_seed();
+    
+    // 5. Generate the jitter!
     vec3 jitter = vec3(random(), random(), random()) * 1024.0;
 
     float sh_coefs[16];
@@ -107,7 +117,6 @@ FORWARD {
 
     // Their Eq. 2: s = 2*sqrt(2) => Mahalanobis^2 <= 8 => power >= -4
     const float POWER_CUTOFF = -4.0;
-    bool had_pos = false;
 
     rayQueryEXT rq;
     rayQueryInitializeEXT(rq, accelerationStructureEXT(parameters.ads),
@@ -135,16 +144,15 @@ FORWARD {
             float B = M00*w.x*d.x + M11*w.y*d.y + M22*w.z*d.z
                     + M01*(w.x*d.y+w.y*d.x) + M02*(w.x*d.z+w.z*d.x)
                     + M12*(w.y*d.z+w.z*d.y);
-            float C = M00*d.x*d.x + M11*d.y*d.y + M22*d.z*d.z
-                    + 2.0*(M01*d.x*d.y + M02*d.x*d.z + M12*d.y*d.z);
+            float t_star = -B / A;
+            vec3 dp = d + t_star * w;                    // perpendicular residual, small
+            float power = -0.5 * (M00*dp.x*dp.x + M11*dp.y*dp.y + M22*dp.z*dp.z
+                                + 2.0*(M01*dp.x*dp.y + M02*dp.x*dp.z + M12*dp.y*dp.z));
 
             // --- Alg. 1 lines 2-3: the 1D Gaussian along the ray ---
             float t_peak = -B / A;
-            float power  = -0.5 * (C - (B*B)/A);
-            if(power>0.0) {
-                had_pos = true;
-            }
-            power = min(power, 0.0);   
+            //float power  = -0.5 * (C - (B*B)/A);
+            //power = min(power, 0.0);   
             // --- Alg. 1 lines 7-9 / Eq. 2: negligibility cull.
             // Evaluated at the PEAK in both depth modes, per Alg. 1 line 8
             // ("mean of g1 is outside the AABB of g").
@@ -195,7 +203,6 @@ FORWARD {
         }
         final_color = clamp(gaussian_color + 0.5, 0.0, 1.0);
     }
-    final_color = had_pos ? vec3(1.0, 0.0, 0.0) : vec3(0.0);
     _output = float[](final_color.x, final_color.y, final_color.z);
     
 }

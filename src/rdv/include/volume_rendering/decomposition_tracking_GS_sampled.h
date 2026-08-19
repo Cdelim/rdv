@@ -107,9 +107,18 @@ FORWARD {
     uint b1 = floatBitsToUint(w.x);
     uint b2 = floatBitsToUint(w.y);
     uint b3 = floatBitsToUint(w.z);
-
+    
+    // 2. Smash them together to create a 100% unique seed per pixel
+    uint seed = b1 ^ (b2 * 1973u) ^ (b3 * 9277u);
+    
+    // 3. Load the seed into the engine state
+    rdv_rng_state = uvec4(seed, seed * 1664525u, ~seed, seed ^ 0x23F1u);
+    
+    // 4. "Warm up" the engine so the first outputs aren't correlated
     random_step(); random_step();
-    rdv_rng_state = random_seed();
+    
+    // 5. Generate the jitter!
+    vec3 jitter = vec3(random(), random(), random()) * 1024.0;
 
     const float K_SIGMA = 3.0;   // matches their default ellipsoid shell extent
 
@@ -166,18 +175,21 @@ FORWARD {
                 //The Math: $C = d^T \Sigma^{-1} d$
                 //What it does: This multiplies the camera-to-Gaussian distance (d) against itself through the shape matrix. 
                 //It acts as the baseline starting distance (the Mahalanobis distance from the camera to the center of the Gaussian).
-                float C = M00*d.x*d.x + M11*d.y*d.y + M22*d.z*d.z
-                        + 2.0*(M01*d.x*d.y + M02*d.x*d.z + M12*d.y*d.z);
+                //float C = M00*d.x*d.x + M11*d.y*d.y + M22*d.z*d.z
+                  //      + 2.0*(M01*d.x*d.y + M02*d.x*d.z + M12*d.y*d.z);
+                  vec3 dp = d + t_star * w;                    // perpendicular residual, small
+                float power = -0.5 * (M00*dp.x*dp.x + M11*dp.y*dp.y + M22*dp.z*dp.z
+                                    + 2.0*(M01*dp.x*dp.y + M02*dp.x*dp.z + M12*dp.y*dp.z));
 
-                float disc = B*B - A*(C - K_SIGMA*K_SIGMA);
-                if (disc < 0.0) continue;       
+               // float disc = B*B - A*(C - K_SIGMA*K_SIGMA);
+                //if (disc < 0.0) continue;       
 
                 //What it does: The math (C - (B*B)/A) calculates how close the ray actually gets to the physical center of the 3D Gaussian at its closest approach.
                 //power: Calculates the exponent for the density.
                 //The if statement: If power < -15.0, the ray passed so far away from the center that the fog is microscopically thin, so it ignores it. 
                 //(Notice this is much more generous than Sun's -4.0 cutoff!).
-                float power = -0.5 * (C - (B*B)/A);
-                power = min(power, 0.0);
+                //float power = -0.5 * (C - (B*B)/A);
+                //power = min(power, 0.0);
                 if (power > -15.0) {
 
                     //This is the core physics math. A standard 3DGS rasterizer just treats opacity (target_alpha) like a piece of tinted glass. 
@@ -211,8 +223,13 @@ FORWARD {
                         //If u is 0.5, probit returns 0. If u is 0.1, it returns a negative number. If u is 0.9, it returns a positive number.
 
                         //t_sample: It takes the peak (t_star) and pushes the hit location slightly forward or backward based on the probit function and the width of the Gaussian (sqrt(A)).
+
+                        // const float PHI_LO = 0.00135;   // Phi(-3)
+                        // const float PHI_HI = 0.99865;   // Phi(+3)
+                        // float u = PHI_LO + random() * (PHI_HI - PHI_LO);
+                        // float t_sample = t_star + probit(u) / sqrt(A);
                         //float t_sample = t_star + probit(u) / sqrt(A);
-                        float t_sample = t_star + random_normal()/ sqrt(A);
+                        float t_sample = t_star + random_normal() * sqrt(A);
 
                         if (t_sample > 0.0 && t_sample < rayQueryGetIntersectionTEXT(rq, true)) {
                             //closest_t = t_sample;

@@ -138,8 +138,13 @@ FORWARD {
                 if (t_enter < best_entry_t) {
                     // alpha: opacity * exp(power) evaluated at THIS primitive's
                     // own peak -- their eval_transmission, our A/B/C form
-                    float power = -0.5 * (C - (B*B)/A);
-                    power = min(power, 0.0);   // their eval_transmission clamps to [0,inf)
+                    float t_star = -B / A;
+                    vec3 dp = d + t_star * w;                    // perpendicular residual, small
+                    float power = -0.5 * (M00*dp.x*dp.x + M11*dp.y*dp.y + M22*dp.z*dp.z
+                                        + 2.0*(M01*dp.x*dp.y + M02*dp.x*dp.z + M12*dp.y*dp.z));
+
+                    //float power = -0.5 * (C - (B*B)/A);
+                    //power = min(power, 0.0);   // their eval_transmission clamps to [0,inf)
                     float alpha = min(opacities.data[i] * exp(power), 0.9999);
                     best_entry_t = t_enter;
                     best_idx = i;
