@@ -59,7 +59,7 @@ their Sec. 4.1) -- use this one for assets trained with a rasterizer, such as
 the standard 3DGS bicycle scene; their Fig. 3 shows it scoring better there.
 */
 
-#define DEPTH_MODE 1
+#define DEPTH_MODE 0
 
 // --- Their Eq. 8 ---
 float sun_r1(float q) {
@@ -98,9 +98,8 @@ FORWARD {
     uint b1 = floatBitsToUint(w.x);
     uint b2 = floatBitsToUint(w.y);
     uint b3 = floatBitsToUint(w.z);
-    uint seed = b1 ^ (b2 * 1973u) ^ (b3 * 9277u);
-    rdv_rng_state = uvec4(seed, seed * 1664525u, ~seed, seed ^ 0x23F1u);
     random_step(); random_step();
+    rdv_rng_state = random_seed();
     vec3 jitter = vec3(random(), random(), random()) * 1024.0;
 
     float sh_coefs[16];
@@ -108,6 +107,7 @@ FORWARD {
 
     // Their Eq. 2: s = 2*sqrt(2) => Mahalanobis^2 <= 8 => power >= -4
     const float POWER_CUTOFF = -4.0;
+    bool had_pos = false;
 
     rayQueryEXT rq;
     rayQueryInitializeEXT(rq, accelerationStructureEXT(parameters.ads),
@@ -141,6 +141,9 @@ FORWARD {
             // --- Alg. 1 lines 2-3: the 1D Gaussian along the ray ---
             float t_peak = -B / A;
             float power  = -0.5 * (C - (B*B)/A);
+            if(power>0.0) {
+                had_pos = true;
+            }
             power = min(power, 0.0);   
             // --- Alg. 1 lines 7-9 / Eq. 2: negligibility cull.
             // Evaluated at the PEAK in both depth modes, per Alg. 1 line 8
@@ -192,8 +195,9 @@ FORWARD {
         }
         final_color = clamp(gaussian_color + 0.5, 0.0, 1.0);
     }
-
+    final_color = had_pos ? vec3(1.0, 0.0, 0.0) : vec3(0.0);
     _output = float[](final_color.x, final_color.y, final_color.z);
+    
 }
 BACKWARD {
     // Not implemented -- forward-only, consistent with this thesis's scope.
