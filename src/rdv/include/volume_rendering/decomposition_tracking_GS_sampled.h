@@ -56,6 +56,9 @@ than to anything in either shader here. Treat that as a separate, still-open
 problem rather than assuming this same fix applies there too.
 */
 
+#define ALPHA_MODE 1        // 0 = 3DGS/Sun convention, 1 = optical depth
+// #define SHARPNESS_EXPERIMENT   // uncomment to restore the capped sampling
+
 float erfinv_approx(float x) {
     float w = -log((1.0 - x) * (1.0 + x));
     float p;
@@ -191,7 +194,12 @@ FORWARD {
                 //float power = -0.5 * (C - (B*B)/A);
                 //power = min(power, 0.0);
                 if (power > POWER_CUTOFF) {
+                    
 
+                    #if ALPHA_MODE == 0
+            // 3DGS / Sun et al. / volprim_rf.py convention
+            float alpha = min(opacities.data[i] * exp(power), 0.9999);
+                    #else
                     //This is the core physics math. A standard 3DGS rasterizer just treats opacity (target_alpha) like a piece of tinted glass. 
                     //But true volumetric ray tracing treats it like a cloud of particles.
                     //peak_tau: It takes the raw opacity and uses -log() to convert it into Optical Depth ($\tau$). 
@@ -203,6 +211,7 @@ FORWARD {
                     float peak_tau  = -log(1.0 - target_alpha);
                     float exact_tau = peak_tau * exp(power);
                     float alpha     = 1.0 - exp(-exact_tau);
+                    #endif
 
                     // --- 1. does this Gaussian interact at all? (same test as before) ---
                     if (random() <= alpha) {
@@ -231,30 +240,25 @@ FORWARD {
                         //float t_sample = t_star + probit(u) / sqrt(A);
                         //float t_sample = t_star + random_normal() * sqrt(A);
                         // 1. Generate a Standard Normal bell curve (Box-Muller transform)
-                        float u1 = max(1e-10, random());
-                        float u2 = random();
-                        float r = sqrt(-2.0 * log(u1));
-                        float theta = 2.0 * 3.14159265359 * u2;
-                        float normal_noise = r * cos(theta);
+                        // --- 2. WHERE does it interact? sample the Gaussian's own
+                        //        1D density along the ray via its inverse CDF. ---
+                        #ifdef SHARPNESS_EXPERIMENT
+                            float u1 = max(1e-10, random());
+                            float u2 = random();
+                            float nz = sqrt(-2.0 * log(u1)) * cos(6.28318530718 * u2);
+                            nz = clamp(nz, -2.0, 2.0);
+                            float t_sample = t_star + nz * min(1.0 / sqrt(A), 0.05);
+                        #else
+                            float u = clamp(random(), 1e-6, 1.0 - 1e-6);
+                            float t_sample = t_star + probit(u) / sqrt(A);
+                        #endif
 
-                        // 2. TRUNCATE: Force the noise to stay within 2 standard deviations.
-                        // This stops the extreme 5% of outliers from scattering way outside the core.
-                        normal_noise = clamp(normal_noise, -2.0, 2.0);
-
-                        // 3. Calculate the true physical width (1-sigma) of the Gaussian along the ray
-                        float true_sigma = 1.0 / sqrt(A);
-
-                        // 4. THE THICKNESS CAP: This fixes the grazing angle ghosting!
-                        // We cap the standard deviation at 0.05 (roughly 5 centimeters).
-                        // - Head-on hit: true_sigma is tiny (e.g., 0.005). The clamp does nothing. True physics!
-                        // - Grazing hit: true_sigma is huge (e.g., 0.600). The clamp snaps it to 0.05. Sharp surface!
-                        float clamped_sigma = min(true_sigma, 0.05);
-
-                        // 5. Calculate the final hit point using the protected math
-                        float t_sample = t_star + (normal_noise * clamped_sigma);
-                        //float t_sample = t_star;
-
-                        if (t_sample > 0.0 && t_sample < rayQueryGetIntersectionTEXT(rq, true)) {
+                        bool has_committed = rayQueryGetIntersectionTypeEXT(rq, true) !=
+                        gl_RayQueryCommittedIntersectionNoneEXT;
+     
+                        if (t_sample > 0.0 &&
+                        (!has_committed ||
+                         t_sample < rayQueryGetIntersectionTEXT(rq, true))) {
                             //closest_t = t_sample;
 
                             rayQueryGenerateIntersectionEXT(rq, t_sample);

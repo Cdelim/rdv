@@ -81,7 +81,7 @@ class DSYG_Offical(_core.Map):
         return DSYG_Offical(
             positions=self.positions,
             colors=self.colors,
-            rotations = self.rotations
+            rotations = self.rotations,
             inv_covs=self.inv_covs,
             opacities=self.opacities,
             f_rest=self.f_rest,   # 6. ADDED: Ensure clone passes it down!
