@@ -117,8 +117,6 @@ FORWARD {
     // 4. "Warm up" the engine so the first outputs aren't correlated
     random_step(); random_step();
     
-    // 5. Generate the jitter!
-    vec3 jitter = vec3(random(), random(), random()) * 1024.0;
 
     const float K_SIGMA = 3.0;   // matches their default ellipsoid shell extent
 
@@ -127,6 +125,8 @@ FORWARD {
 
     float closest_t = 10000.0;
     vec3 final_color = vec3(0.0);
+
+    const float POWER_CUTOFF = -4.0;
 
     rayQueryEXT rq;
     rayQueryInitializeEXT(rq, accelerationStructureEXT(parameters.ads),
@@ -190,7 +190,7 @@ FORWARD {
                 //(Notice this is much more generous than Sun's -4.0 cutoff!).
                 //float power = -0.5 * (C - (B*B)/A);
                 //power = min(power, 0.0);
-                if (power > -15.0) {
+                if (power > POWER_CUTOFF) {
 
                     //This is the core physics math. A standard 3DGS rasterizer just treats opacity (target_alpha) like a piece of tinted glass. 
                     //But true volumetric ray tracing treats it like a cloud of particles.
@@ -251,8 +251,8 @@ FORWARD {
                         float clamped_sigma = min(true_sigma, 0.05);
 
                         // 5. Calculate the final hit point using the protected math
-                        //float t_sample = t_star + (normal_noise * clamped_sigma);
-                        float t_sample = t_star;
+                        float t_sample = t_star + (normal_noise * clamped_sigma);
+                        //float t_sample = t_star;
 
                         if (t_sample > 0.0 && t_sample < rayQueryGetIntersectionTEXT(rq, true)) {
                             //closest_t = t_sample;
