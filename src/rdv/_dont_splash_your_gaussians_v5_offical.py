@@ -13,6 +13,7 @@ class DSYG_Offical(_core.Map):
             ads=_torch.int64,
             positions=_torch.Tensor,
             colors=_torch.Tensor,
+            rotations=_torch.Tensor,
             inv_covs=_torch.Tensor,
             opacities=_torch.Tensor,
             scales = _torch.Tensor,
@@ -24,6 +25,7 @@ class DSYG_Offical(_core.Map):
 
     def __init__(self, positions: _core.TensorLike | _core.deferred, 
                  colors:_core.TensorLike | _core.deferred, 
+                 rotations:_core.TensorLike | _core.deferred, 
                  inv_covs:_core.TensorLike | _core.deferred,
                  covs:_core.TensorLike | _core.deferred,   
                  opacities:_core.TensorLike | _core.deferred, 
@@ -34,6 +36,7 @@ class DSYG_Offical(_core.Map):
         
         positions = _core.ensure_tensor(positions, map_dim=2)
         colors = _core.ensure_tensor(colors, map_dim=2)
+        rotations = _core.ensure_tensor(colors, map_dim=2)
         inv_covs = _core.ensure_tensor(inv_covs, map_dim=2)
         covs = _core.ensure_tensor(covs, map_dim=2)
         opacities = _core.ensure_tensor(opacities, map_dim=1)
@@ -62,6 +65,7 @@ class DSYG_Offical(_core.Map):
         
         self.positions = positions
         self.colors = colors
+        self.rotations = rotations
         self.inv_covs = inv_covs
         self.opacities = opacities
         self.f_rest = f_rest      # 5. ADDED: Save it to the instance
@@ -77,6 +81,7 @@ class DSYG_Offical(_core.Map):
         return DSYG_Offical(
             positions=self.positions,
             colors=self.colors,
+            rotations = self.rotations
             inv_covs=self.inv_covs,
             opacities=self.opacities,
             f_rest=self.f_rest,   # 6. ADDED: Ensure clone passes it down!
