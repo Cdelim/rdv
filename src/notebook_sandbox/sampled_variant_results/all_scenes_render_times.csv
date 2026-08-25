@@ -1,0 +1,25 @@
+scene,variant,render_seconds
+bicycle,"GS3D_Sampled (opticaldepth, volumetric -- default)",26.80469710699981
+bicycle,GS3D_Sampled_OpticalDepth_Importance,43.01271494200046
+bicycle,GS3D_Sampled_OpticalDepth_Center,26.49889495900061
+bicycle,GS3D_Sampled_Sun_Volumetric,29.33398912300072
+bicycle,GS3D_Sampled_Sun_Importance,44.174388899000405
+bicycle,GS3D_Sampled_Sun_Center,28.907135916000698
+bonsai,"GS3D_Sampled (opticaldepth, volumetric -- default)",4.30650522599899
+bonsai,GS3D_Sampled_OpticalDepth_Importance,6.41857636900022
+bonsai,GS3D_Sampled_OpticalDepth_Center,4.285551889000999
+bonsai,GS3D_Sampled_Sun_Volumetric,4.6420991830000276
+bonsai,GS3D_Sampled_Sun_Importance,7.061280039000849
+bonsai,GS3D_Sampled_Sun_Center,4.587128939001559
+counter,"GS3D_Sampled (opticaldepth, volumetric -- default)",8.691929643999174
+counter,GS3D_Sampled_OpticalDepth_Importance,17.086756549999336
+counter,GS3D_Sampled_OpticalDepth_Center,8.56146792799882
+counter,GS3D_Sampled_Sun_Volumetric,9.583463826000298
+counter,GS3D_Sampled_Sun_Importance,18.479501275000075
+counter,GS3D_Sampled_Sun_Center,9.38181606299986
+drjohnson,"GS3D_Sampled (opticaldepth, volumetric -- default)",2.8741476770010195
+drjohnson,GS3D_Sampled_OpticalDepth_Importance,4.929431920998468
+drjohnson,GS3D_Sampled_OpticalDepth_Center,2.879302949999328
+drjohnson,GS3D_Sampled_Sun_Volumetric,3.125225044999752
+drjohnson,GS3D_Sampled_Sun_Importance,5.102133567999772
+drjohnson,GS3D_Sampled_Sun_Center,3.105073873000947

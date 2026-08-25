@@ -49,7 +49,7 @@ void main()
 }
 
 
-#define RDV_CODENAME GS3DSampledSunProbit_9
+#define RDV_CODENAME GS3DSampledSunCenter_11
     layout(buffer_reference, scalar, buffer_reference_align=8) buffer MAP_BUFFER_NAME(RDV_CODENAME) {int rdv_kernel_id; 
 int rdv_map_pad0; 
 int rdv_map_pad1; 
@@ -70,7 +70,7 @@ GPUPtr covs;
 #define MAP_DECL in RDV_CODENAME _this 
 #define parameters _this.data 
 #include "system\push_signatures.h"
-#include "decomposition_tracking_GS_sampled_sun_probit.h"
+#include "decomposition_tracking_GS_sampled_sun_center.h"
 
 #include "system\pop_signatures.h"
 #undef MAP_DECL
@@ -80,7 +80,7 @@ GPUPtr covs;
 #undef OUTPUT_DIM
 #undef STOCHASTIC
 
-#define RDV_CODENAME CameraProbes_10
+#define RDV_CODENAME CameraProbes_12
     layout(buffer_reference, scalar, buffer_reference_align=8) buffer MAP_BUFFER_NAME(RDV_CODENAME) {int rdv_kernel_id; 
 int rdv_map_pad0; 
 int rdv_map_pad1; 
@@ -112,8 +112,8 @@ float aspect_ratio;
 int rdv_map_pad0; 
 int rdv_map_pad1; 
 int rdv_map_pad2; 
-CameraProbes_10 probes_map; 
-GS3DSampledSunProbit_9 field_map; 
+CameraProbes_12 probes_map; 
+GS3DSampledSunCenter_11 field_map; 
 GPUPtr rdv_indices; 
 GPUPtr output_tensor; 
 int shape[3]; 
