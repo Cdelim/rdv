@@ -55,7 +55,7 @@ along the ray, which is closer to Condor et al.'s interval-based integration
 than to anything in either shader here. Treat that as a separate, still-open
 problem rather than assuming this same fix applies there too.
 
-THIS FILE: ALPHA_MODE=optical depth, SAMPLE_MODE=volumetric. One of six
+THIS FILE: ALPHA_MODE=3DGS/Sun, SAMPLE_MODE=volumetric. One of six
 independent alpha-convention x position-sampling combinations (2 alpha
 conventions x 3 position-sampling strategies), each in its own file so all
 six can be compiled and rendered together for comparison instead of one at
@@ -207,17 +207,17 @@ FORWARD {
                 //float power = -0.5 * (C - (B*B)/A);
                 //power = min(power, 0.0);
                 if (power > POWER_CUTOFF) {
-                    // ALPHA_MODE: optical depth. `alpha` is the probability
-                    // this primitive is the one that interacts with the ray
-                    // (Russian-roulette test below), derived from converting
-                    // the raw opacity to an optical depth tau and applying
-                    // the exponential density falloff away from the peak.
-                    // See the sibling *_sun_*.h files for the alternative
-                    // (3DGS/Sun per-splat alpha convention).
-                    float target_alpha = min(opacities.data[i], 0.999);
-                    float peak_tau     = -log(1.0 - target_alpha);
-                    float exact_tau    = peak_tau * exp(power);
-                    float alpha        = 1.0 - exp(-exact_tau);
+                    // ALPHA_MODE: 3DGS/Sun per-splat alpha -- "alpha =
+                    // opacity * G(peak): the standard 3DGS convention", see
+                    // stochastic_raytracing_sun2025.h. See the sibling
+                    // *_opticaldepth_*.h files for the optical-depth
+                    // alternative.
+                    float alpha = min(opacities.data[i] * exp(power), 0.9999);
+                    // exact_tau is only needed by the *_volumetric.h
+                    // sampling method below; derived from alpha so that
+                    // method still has a well-defined closed-form
+                    // free-flight distance under this alpha convention too.
+                    float exact_tau = -log(max(1.0 - alpha, 1e-6));
                     // SAMPLE_MODE: volumetric -- one closed-form free-flight
                     // sample per primitive (Kutz et al. 2017). A single
                     // random number determines BOTH whether this primitive

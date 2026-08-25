@@ -55,7 +55,7 @@ along the ray, which is closer to Condor et al.'s interval-based integration
 than to anything in either shader here. Treat that as a separate, still-open
 problem rather than assuming this same fix applies there too.
 
-THIS FILE: ALPHA_MODE=optical depth, SAMPLE_MODE=volumetric. One of six
+THIS FILE: ALPHA_MODE=optical depth, SAMPLE_MODE=center. One of six
 independent alpha-convention x position-sampling combinations (2 alpha
 conventions x 3 position-sampling strategies), each in its own file so all
 six can be compiled and rendered together for comparison instead of one at
@@ -218,23 +218,14 @@ FORWARD {
                     float peak_tau     = -log(1.0 - target_alpha);
                     float exact_tau    = peak_tau * exp(power);
                     float alpha        = 1.0 - exp(-exact_tau);
-                    // SAMPLE_MODE: volumetric -- one closed-form free-flight
-                    // sample per primitive (Kutz et al. 2017). A single
-                    // random number determines BOTH whether this primitive
-                    // interacts AND exactly where, so this does NOT also
-                    // gate on `random() < alpha`: solving T(t) = 1-u with
-                    // T(t) = exp(-tau * Phi((t - t_star) * sqrt(A))) gives
-                    // Phi = -ln(1-u)/tau, and P(Phi < 1) = 1-exp(-tau) =
-                    // alpha exactly, so the two tests are already
-                    // statistically equivalent. See the sibling
-                    // *_importance.h / *_center.h files for the decoupled
-                    // alpha-then-place strategies.
-                    float u   = clamp(random(), 1e-6, 1.0 - 1e-6);
-                    float Phi = -log(1.0 - u) / exact_tau;
-                    if (Phi < 1.0) {
-                        // Clamp the probit output to stay within [-K_SIGMA, +K_SIGMA]
-                        float z_offset = clamp(probit(clamp(Phi, 1e-4, 1.0 - 1e-4)), -K_SIGMA, K_SIGMA);
-                        float t_sample = t_star + z_offset / sqrt(A);
+                    // SAMPLE_MODE: center. Whether this primitive interacts
+                    // is a Bernoulli test on `alpha` (computed above); given
+                    // a hit, the position is placed deterministically at the
+                    // analytic peak t_star -- no positional randomization at
+                    // all. Baseline for comparison against the two sampled
+                    // placements (*_importance.h / *_volumetric.h).
+                    if (random() < alpha) {
+                        float t_sample = t_star;
                         bool has_committed = rayQueryGetIntersectionTypeEXT(rq, true) !=
                                             gl_RayQueryCommittedIntersectionNoneEXT;
                         if (t_sample > 0.0 &&
