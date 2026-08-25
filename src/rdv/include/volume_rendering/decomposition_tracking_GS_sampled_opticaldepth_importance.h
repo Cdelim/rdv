@@ -227,7 +227,8 @@ FORWARD {
                     // *_volumetric.h files for the other two placement
                     // strategies.
                     if (random() < alpha) {
-                        float t_sample = t_star + random_normal() * sqrt(A);
+                        float noise = clamp(random_normal(), -K_SIGMA, K_SIGMA);
+                        float t_sample = t_star + (noise / sqrt(A));
                         bool has_committed = rayQueryGetIntersectionTypeEXT(rq, true) !=
                                             gl_RayQueryCommittedIntersectionNoneEXT;
                         if (t_sample > 0.0 &&
