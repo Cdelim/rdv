@@ -57,6 +57,8 @@ problem rather than assuming this same fix applies there too.
 */
 
 #define ALPHA_MODE 1        // 0 = 3DGS/Sun convention, 1 = optical depth
+#define FREE_FLIGHT 1    // 1 = one closed-form draw (volumetric, pulls hits forward)
+                        // 0 = accept, then place at probit(u) (peak-centred)
 // #define SHARPNESS_EXPERIMENT   // uncomment to restore the capped sampling
 
 float erfinv_approx(float x) {
@@ -194,13 +196,11 @@ FORWARD {
                 //float power = -0.5 * (C - (B*B)/A);
                 //power = min(power, 0.0);
                 if (power > POWER_CUTOFF) {
-                    
-
                     #if ALPHA_MODE == 0
-            // 3DGS / Sun et al. / volprim_rf.py convention
-            float alpha = min(opacities.data[i] * exp(power), 0.9999);
-                    #else
-                    //This is the core physics math. A standard 3DGS rasterizer just treats opacity (target_alpha) like a piece of tinted glass. 
+                    float alpha     = min(opacities.data[i] * exp(power), 0.9999);
+                    float exact_tau = -log(max(1.0 - alpha, 1e-6));
+                #else
+                //This is the core physics math. A standard 3DGS rasterizer just treats opacity (target_alpha) like a piece of tinted glass. 
                     //But true volumetric ray tracing treats it like a cloud of particles.
                     //peak_tau: It takes the raw opacity and uses -log() to convert it into Optical Depth ($\tau$). 
                     //Optical depth is a physics term measuring how much physical "stuff" (particles) is actually floating in that space.
@@ -208,17 +208,38 @@ FORWARD {
                         //This gives the exact amount of "stuff" the ray will pass through on its specific path.
                     //alpha: Converts that "stuff" back into a percentage probability (1.0 - exp(-exact_tau)).
                     float target_alpha = min(opacities.data[i], 0.999);
-                    float peak_tau  = -log(1.0 - target_alpha);
-                    float exact_tau = peak_tau * exp(power);
-                    float alpha     = 1.0 - exp(-exact_tau);
-                    #endif
+                    float peak_tau     = -log(1.0 - target_alpha);
+                    float exact_tau    = peak_tau * exp(power);
+                #endif
+                    // One closed-form free-flight sample per primitive. A single random number
+                    // determines BOTH whether this primitive interacts and exactly where.
+                    // Solve T(t) = 1-u with T(t) = exp(-tau * Phi((t - t_star) * sqrt(A))):
+                    //     Phi = -ln(1-u) / tau
+                    // Phi >= 1 means no collision anywhere in this primitive; that occurs with
+                    // probability exp(-tau) = 1-alpha, so the accept/reject test is built in.
+                    
+                    #if FREE_FLIGHT
+                    float u   = clamp(random(), 1e-6, 1.0 - 1e-6);
+                    float Phi = -log(1.0 - u) / exact_tau;
+                    if (Phi < 1.0) {
+                        // Clamp the probit output to stay within [-K_SIGMA, +K_SIGMA]
+                        float z_offset = clamp(probit(clamp(Phi, 1e-4, 1.0 - 1e-4)), -K_SIGMA, K_SIGMA);
+                        float t_sample = t_star + z_offset / sqrt(A);
+                #else
+                    float alpha_acc = 1.0 - exp(-exact_tau);
+                    if (random() <= alpha_acc) {
+                        float u = clamp(random(), 1e-6, 1.0 - 1e-6);
+                        float t_sample = t_star + probit(u) / sqrt(A);
+                #endif
+                        bool has_committed = rayQueryGetIntersectionTypeEXT(rq, true) !=
+                                            gl_RayQueryCommittedIntersectionNoneEXT;
+                        if (t_sample > 0.0 &&
+                            (!has_committed || t_sample < rayQueryGetIntersectionTEXT(rq, true))) {
+                            rayQueryGenerateIntersectionEXT(rq, t_sample);
+                    
+                    
 
-                    // --- 1. does this Gaussian interact at all? (same test as before) ---
-                    if (random() <= alpha) {
-
-                        // --- 2. WHERE does it interact? sample from its OWN density
-                        //        instead of always using t_star. This is the fix. ---
-                        //float u = clamp(random(), 1e-6, 1.0 - 1e-6);
+                        
 
 
 
@@ -233,35 +254,20 @@ FORWARD {
 
                         //t_sample: It takes the peak (t_star) and pushes the hit location slightly forward or backward based on the probit function and the width of the Gaussian (sqrt(A)).
 
-                        // const float PHI_LO = 0.00135;   // Phi(-3)
-                        // const float PHI_HI = 0.99865;   // Phi(+3)
-                        // float u = PHI_LO + random() * (PHI_HI - PHI_LO);
-                        // float t_sample = t_star + probit(u) / sqrt(A);
-                        //float t_sample = t_star + probit(u) / sqrt(A);
-                        //float t_sample = t_star + random_normal() * sqrt(A);
+                       
                         // 1. Generate a Standard Normal bell curve (Box-Muller transform)
                         // --- 2. WHERE does it interact? sample the Gaussian's own
                         //        1D density along the ray via its inverse CDF. ---
-                        #ifdef SHARPNESS_EXPERIMENT
-                            float u1 = max(1e-10, random());
-                            float u2 = random();
-                            float nz = sqrt(-2.0 * log(u1)) * cos(6.28318530718 * u2);
-                            nz = clamp(nz, -2.0, 2.0);
-                            float t_sample = t_star + nz * min(1.0 / sqrt(A), 0.05);
-                        #else
-                            float u = clamp(random(), 1e-6, 1.0 - 1e-6);
-                            float t_sample = t_star + probit(u) / sqrt(A);
-                        #endif
+                        
+                        //float u = clamp(random(), 1e-6, 1.0 - 1e-6);
+                        //float t_sample = t_star + probit(u) / sqrt(A);
+                        
 
-                        bool has_committed = rayQueryGetIntersectionTypeEXT(rq, true) !=
-                        gl_RayQueryCommittedIntersectionNoneEXT;
+                        
      
-                        if (t_sample > 0.0 &&
-                        (!has_committed ||
-                         t_sample < rayQueryGetIntersectionTEXT(rq, true))) {
+                        
                             //closest_t = t_sample;
 
-                            rayQueryGenerateIntersectionEXT(rq, t_sample);
 
                             vec3 gaussian_color = colors.data[i] * sh_coefs[0];
                             int rest_idx = i * 45;
