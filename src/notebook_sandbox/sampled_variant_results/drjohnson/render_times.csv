@@ -1,0 +1,7 @@
+scene,variant,render_seconds
+drjohnson,"GS3D_Sampled (opticaldepth, volumetric -- default)",2.874148
+drjohnson,GS3D_Sampled_OpticalDepth_Importance,4.929432
+drjohnson,GS3D_Sampled_OpticalDepth_Center,2.879303
+drjohnson,GS3D_Sampled_Sun_Volumetric,3.125225
+drjohnson,GS3D_Sampled_Sun_Importance,5.102134
+drjohnson,GS3D_Sampled_Sun_Center,3.105074
