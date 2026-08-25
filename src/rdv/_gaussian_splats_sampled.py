@@ -2,42 +2,70 @@
 #
 # This file is intentionally a near-verbatim copy of _gaussian_splats.py.
 # The ONLY functional differences from the original GS3D are:
-#   1. the class name (GS3D_Sampled instead of GS3D), and
-#   2. the shader `path=`, which points at decomposition_tracking_GS_sampled.h
-#      instead of decomposition_tracking_GS.h.
+#   1. the class name (GS3D_Sampled and friends, instead of GS3D), and
+#   2. the shader `path=`, which points at one of the
+#      decomposition_tracking_GS_sampled*.h files instead of
+#      decomposition_tracking_GS.h.
 # build_geometry_ads / build_ads (BLAS/TLAS construction, AABB sizing from the
 # covariance) are unchanged on purpose: the acceleration structure is
-# identical across all of GS3D, GS3D_Ratio, and GS3D_Sampled -- only the
-# per-ray blending shader differs between them.
+# identical across all of GS3D, GS3D_Ratio, and every GS3D_Sampled* variant
+# below -- only the per-ray blending shader differs between them.
 #
 # Place this file next to _gaussian_splats.py inside the rdv package (i.e.
-# wherever `from . import _core` resolves), and add one line to rdv's
+# wherever `from . import _core` resolves), and add these lines to rdv's
 # __init__.py:
-#     from ._gaussian_splats_sampled import GS3D_Sampled
-# so that `rdv.GS3D_Sampled` becomes available exactly like `rdv.GS3D`.
+#     from ._gaussian_splats_sampled import (
+#         GS3D_Sampled,
+#         GS3D_Sampled_OpticalDepth_Importance,
+#         GS3D_Sampled_OpticalDepth_Center,
+#         GS3D_Sampled_Sun_Volumetric,
+#         GS3D_Sampled_Sun_Importance,
+#         GS3D_Sampled_Sun_Center,
+#     )
+# so that `rdv.GS3D_Sampled` (and siblings) become available exactly like
+# `rdv.GS3D`.
+#
+# SIX VARIANTS, ONE SHADER EACH: the sampled estimator has two independent
+# choices -- the ALPHA_MODE, i.e. how the per-primitive hit probability
+# `alpha` is computed (3DGS/Sun's `opacity * exp(power)`, see
+# stochastic_raytracing_sun2025.h, vs. converting opacity to an optical
+# depth tau and applying the exponential falloff to that instead), and the
+# SAMPLE_MODE, i.e. where the hit is placed given that a primitive was
+# accepted (a genuine draw from core.h's random_normal() -- "importance";
+# deterministically at the analytic peak t_star, no placement randomness at
+# all -- "center"; or one closed-form volumetric free-flight draw that
+# determines accept AND placement together in one step, per Kutz et al.
+# 2017 -- "volumetric"). These used to be `#define ALPHA_MODE` / `#define
+# FREE_FLIGHT` toggles inside a single .h file, which meant comparing them
+# required editing defines and recompiling between runs. Each of the
+# 2 x 3 = 6 combinations now has its own .h file and its own Map class here,
+# so all six can be built and rendered side by side in the same notebook run:
+#
+#   class                                 | shader file                                                  | ALPHA_MODE    | SAMPLE_MODE
+#   --------------------------------------|---------------------------------------------------------------|---------------|------------
+#   GS3D_Sampled                          | decomposition_tracking_GS_sampled.h                            | optical depth | volumetric (default)
+#   GS3D_Sampled_OpticalDepth_Importance  | decomposition_tracking_GS_sampled_opticaldepth_importance.h    | optical depth | importance
+#   GS3D_Sampled_OpticalDepth_Center      | decomposition_tracking_GS_sampled_opticaldepth_center.h        | optical depth | center
+#   GS3D_Sampled_Sun_Volumetric           | decomposition_tracking_GS_sampled_sun_volumetric.h             | Sun/3DGS      | volumetric
+#   GS3D_Sampled_Sun_Importance           | decomposition_tracking_GS_sampled_sun_importance.h             | Sun/3DGS      | importance
+#   GS3D_Sampled_Sun_Center                | decomposition_tracking_GS_sampled_sun_center.h                 | Sun/3DGS      | center
+#
+# All six share identical __init__/clone/build_geometry_ads/build_ads
+# behavior via _GS3D_SampledVariant below; only __extension_info__['path']
+# and clone()'s return type differ per subclass.
 
 import torch as _torch
 from . import _core
 import vulky as _vk
 
 
-class GS3D_Sampled(_core.Map):
-    __extension_info__ = dict(
-        path=_core.__INCLUDE_PATH__ + '/volume_rendering/decomposition_tracking_GS_sampled.h',
-        parameters=dict(
-            ads=_torch.int64,
-            positions=_torch.Tensor,
-            colors=_torch.Tensor,
-            inv_covs=_torch.Tensor,
-            opacities=_torch.Tensor,
-            scales=_torch.Tensor,
-            f_rest=_torch.Tensor,
-            covs=_torch.Tensor
-        ),
-        stochastic=True   # properly-sampled hit location -- genuinely stochastic per trial;
-                          # many independent traces are needed to converge, same as the original
-                          # GS3D, not just one -- see decomposition_tracking_GS_sampled.h.
-    )
+class _GS3D_SampledVariant(_core.Map):
+    # Abstract base: every concrete subclass below must still declare its own
+    # __extension_info__ (the metaclass requires it directly on the class,
+    # not inherited -- see _ComputeMeta in _core.py), but __init__, clone,
+    # and the acceleration-structure builders are identical across variants
+    # and live here once.
+    __extension_info__ = None
 
     def __init__(self, positions: _core.TensorLike | _core.deferred,
                  colors: _core.TensorLike | _core.deferred,
@@ -91,7 +119,7 @@ class GS3D_Sampled(_core.Map):
         self.ads = None
 
     def clone(self, **kwargs) -> 'Map':
-        return GS3D_Sampled(
+        return type(self)(
             positions=self.positions,
             colors=self.colors,
             inv_covs=self.inv_covs,
@@ -226,3 +254,77 @@ class GS3D_Sampled(_core.Map):
         )
 
         self.ads = _vk.wrap_gpu(vk_scene_ads.handle)
+
+
+# --- Concrete variants ---------------------------------------------------
+# Each subclass only needs to fix __extension_info__['path'] to its own
+# shader file; __init__/clone/build_geometry_ads/build_ads all come from
+# _GS3D_SampledVariant above unchanged.
+
+_SAMPLED_PARAMETERS = dict(
+    ads=_torch.int64,
+    positions=_torch.Tensor,
+    colors=_torch.Tensor,
+    inv_covs=_torch.Tensor,
+    opacities=_torch.Tensor,
+    scales=_torch.Tensor,
+    f_rest=_torch.Tensor,
+    covs=_torch.Tensor
+)
+
+
+class GS3D_Sampled(_GS3D_SampledVariant):
+    # ALPHA_MODE=optical depth, SAMPLE_MODE=volumetric -- the default this
+    # project has been using.
+    __extension_info__ = dict(
+        path=_core.__INCLUDE_PATH__ + '/volume_rendering/decomposition_tracking_GS_sampled.h',
+        parameters=_SAMPLED_PARAMETERS,
+        stochastic=True   # properly-sampled hit location -- genuinely stochastic per trial;
+                          # many independent traces are needed to converge, same as the original
+                          # GS3D, not just one -- see decomposition_tracking_GS_sampled.h.
+    )
+
+
+class GS3D_Sampled_OpticalDepth_Importance(_GS3D_SampledVariant):
+    # ALPHA_MODE=optical depth, SAMPLE_MODE=importance (random_normal() draw).
+    __extension_info__ = dict(
+        path=_core.__INCLUDE_PATH__ + '/volume_rendering/decomposition_tracking_GS_sampled_opticaldepth_importance.h',
+        parameters=_SAMPLED_PARAMETERS,
+        stochastic=True
+    )
+
+
+class GS3D_Sampled_OpticalDepth_Center(_GS3D_SampledVariant):
+    # ALPHA_MODE=optical depth, SAMPLE_MODE=center (deterministic, at t_star).
+    __extension_info__ = dict(
+        path=_core.__INCLUDE_PATH__ + '/volume_rendering/decomposition_tracking_GS_sampled_opticaldepth_center.h',
+        parameters=_SAMPLED_PARAMETERS,
+        stochastic=True
+    )
+
+
+class GS3D_Sampled_Sun_Volumetric(_GS3D_SampledVariant):
+    # ALPHA_MODE=3DGS/Sun, SAMPLE_MODE=volumetric.
+    __extension_info__ = dict(
+        path=_core.__INCLUDE_PATH__ + '/volume_rendering/decomposition_tracking_GS_sampled_sun_volumetric.h',
+        parameters=_SAMPLED_PARAMETERS,
+        stochastic=True
+    )
+
+
+class GS3D_Sampled_Sun_Importance(_GS3D_SampledVariant):
+    # ALPHA_MODE=3DGS/Sun, SAMPLE_MODE=importance (random_normal() draw).
+    __extension_info__ = dict(
+        path=_core.__INCLUDE_PATH__ + '/volume_rendering/decomposition_tracking_GS_sampled_sun_importance.h',
+        parameters=_SAMPLED_PARAMETERS,
+        stochastic=True
+    )
+
+
+class GS3D_Sampled_Sun_Center(_GS3D_SampledVariant):
+    # ALPHA_MODE=3DGS/Sun, SAMPLE_MODE=center (deterministic, at t_star).
+    __extension_info__ = dict(
+        path=_core.__INCLUDE_PATH__ + '/volume_rendering/decomposition_tracking_GS_sampled_sun_center.h',
+        parameters=_SAMPLED_PARAMETERS,
+        stochastic=True
+    )
