@@ -1,0 +1,7 @@
+scene,variant,render_seconds
+flowers,"GS3D_Sampled (opticaldepth, volumetric -- default)",0.362850
+flowers,GS3D_Sampled_OpticalDepth_Importance,0.363142
+flowers,GS3D_Sampled_OpticalDepth_Center,0.349378
+flowers,GS3D_Sampled_Sun_Volumetric,0.405987
+flowers,GS3D_Sampled_Sun_Importance,0.417453
+flowers,GS3D_Sampled_Sun_Center,0.394636
