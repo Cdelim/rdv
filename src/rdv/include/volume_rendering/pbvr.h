@@ -38,6 +38,7 @@ FORWARD {
 #endif
         return;
     }
+    tMin = max(0, tMin);
 
     x += wo * tMin; // initial position in object space
     float d = tMax - tMin; // max_t wrt wo
@@ -77,22 +78,19 @@ FORWARD {
         float g = anisotropy(_this, x);
 
 #ifdef ENVIRONMENT_SAMPLER
-        if (bounces > 1)
-        {
-            // add contribution from environment lighting with NEE
-            float env_sample[3 + SPECTRAL_DIM + 1]; // wnee, env/pdf(wnee), pdf (pdf not necessary here)
-            // x is in object space, w is in world space, we need to convert x to world space for querying environment sampler, and convert nee_w back to object space for computing transmittance
-            forward(parameters.environment_sampler, float[](x.x, x.y, x.z, w.x, w.y, w.z), env_sample);
-            vec3 nee_w = vec3(env_sample[0], env_sample[1], env_sample[2]);
-            float nee_phase = hg_phase_eval(w, nee_w, g);
-            nee_w = L * nee_w; // convert to object space
-            float nee_d;
-            ray_box_intersection(x, nee_w, tMin, nee_d); // compute intersection with volume boundary for next iteration
-            float tr = transmittance_rt(_this, x, nee_w, nee_d);
-            tr *= nee_phase;
-            for (int i=0; i<SPECTRAL_DIM; i++)
-                _output[i] += W[i] * env_sample[3 + i] * tr; // accumulate NEE contribution
-        }
+        // add contribution from environment lighting with NEE
+        float env_sample[3 + SPECTRAL_DIM + 1]; // wnee, env/pdf(wnee), pdf (pdf not necessary here)
+        // x is in object space, w is in world space, we need to convert x to world space for querying environment sampler, and convert nee_w back to object space for computing transmittance
+        forward(parameters.environment_sampler, float[](x.x, x.y, x.z, w.x, w.y, w.z), env_sample);
+        vec3 nee_w = vec3(env_sample[0], env_sample[1], env_sample[2]);
+        float nee_phase = hg_phase_eval(w, nee_w, g);
+        nee_w = L * nee_w; // convert to object space
+        float nee_d;
+        ray_box_intersection(x, nee_w, tMin, nee_d); // compute intersection with volume boundary for next iteration
+        float tr = transmittance_rt(_this, x, nee_w, nee_d);
+        tr *= nee_phase;
+        for (int i=0; i<SPECTRAL_DIM; i++)
+            _output[i] += W[i] * env_sample[3 + i] * tr; // accumulate NEE contribution
 #endif
         // scatter ray
         w = hg_phase_sample(w, g); // compute scattering direction in world space

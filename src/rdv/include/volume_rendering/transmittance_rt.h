@@ -26,6 +26,8 @@ FORWARD {
         return;
     }
 
+    tMin = max(0, tMin);
+
     x += wo * tMin; // initial position in object space
     float d = tMax - tMin; // max_t wrt wo
 

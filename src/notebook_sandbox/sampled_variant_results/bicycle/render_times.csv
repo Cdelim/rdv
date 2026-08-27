@@ -1,7 +1,8 @@
 scene,variant,render_seconds
-bicycle,"GS3D_Sampled (opticaldepth, volumetric -- default)",26.804697
-bicycle,GS3D_Sampled_OpticalDepth_Importance,43.012715
-bicycle,GS3D_Sampled_OpticalDepth_Center,26.498895
-bicycle,GS3D_Sampled_Sun_Volumetric,29.333989
-bicycle,GS3D_Sampled_Sun_Importance,44.174389
-bicycle,GS3D_Sampled_Sun_Center,28.907136
+scene,variant,render_seconds
+bicycle,"GS3D_Sampled (opticaldepth, volumetric -- default)",1.739592
+bicycle,GS3D_Sampled_OpticalDepth_Importance,1.795441
+bicycle,GS3D_Sampled_OpticalDepth_Center,1.714279
+bicycle,GS3D_Sampled_Sun_Volumetric,1.903536
+bicycle,GS3D_Sampled_Sun_Importance,1.948657
+bicycle,GS3D_Sampled_Sun_Center,1.853570

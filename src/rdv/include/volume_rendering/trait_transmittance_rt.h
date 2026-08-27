@@ -15,7 +15,34 @@ float transmittance_rt(MAP_DECL, vec3 x, vec3 w, float d)
 
         T *= (1.0 - extinction(_this, x) / maj);
 
-        if (T < 0.01)
+        if (T < 0.1)
+        {
+            if (random() >= T)
+                return 0.0;
+            T = 1.0; // Russian roulette
+        }
+    }
+    return T;
+}
+
+float transmittance_rt(MAP_DECL, vec3 x, vec3 w, float d, float scale)
+{
+    float T = 1.0;
+    while (d > 0.) {
+        float maj_distance;
+        float maj = majorant(_this, x, w, maj_distance) * scale;
+        float dt = min(maj_distance, -log(1.0 - random()) / maj); // sample free-flight distance
+        x += dt * w;
+        d -= dt;
+        if (dt == maj_distance)
+            continue; // no interaction withing slab, continue
+
+        if (d <= 0.0)
+            break; // reached the end of the segment
+
+        T *= (1.0 - extinction(_this, x) * scale / maj);
+
+        if (T < 0.1)
         {
             if (random() >= T)
                 return 0.0;

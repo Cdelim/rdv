@@ -1,7 +1,8 @@
 scene,variant,render_seconds
-counter,"GS3D_Sampled (opticaldepth, volumetric -- default)",8.691930
-counter,GS3D_Sampled_OpticalDepth_Importance,17.086757
-counter,GS3D_Sampled_OpticalDepth_Center,8.561468
-counter,GS3D_Sampled_Sun_Volumetric,9.583464
-counter,GS3D_Sampled_Sun_Importance,18.479501
-counter,GS3D_Sampled_Sun_Center,9.381816
+scene,variant,render_seconds
+counter,"GS3D_Sampled (opticaldepth, volumetric -- default)",0.542016
+counter,GS3D_Sampled_OpticalDepth_Importance,0.562870
+counter,GS3D_Sampled_OpticalDepth_Center,0.529817
+counter,GS3D_Sampled_Sun_Volumetric,0.606630
+counter,GS3D_Sampled_Sun_Importance,0.637367
+counter,GS3D_Sampled_Sun_Center,0.586703

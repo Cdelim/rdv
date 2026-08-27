@@ -1,7 +1,8 @@
 scene,variant,render_seconds
-bonsai,"GS3D_Sampled (opticaldepth, volumetric -- default)",4.306505
-bonsai,GS3D_Sampled_OpticalDepth_Importance,6.418576
-bonsai,GS3D_Sampled_OpticalDepth_Center,4.285552
-bonsai,GS3D_Sampled_Sun_Volumetric,4.642099
-bonsai,GS3D_Sampled_Sun_Importance,7.061280
-bonsai,GS3D_Sampled_Sun_Center,4.587129
+scene,variant,render_seconds
+bonsai,"GS3D_Sampled (opticaldepth, volumetric -- default)",0.245213
+bonsai,GS3D_Sampled_OpticalDepth_Importance,0.252902
+bonsai,GS3D_Sampled_OpticalDepth_Center,0.246743
+bonsai,GS3D_Sampled_Sun_Volumetric,0.266198
+bonsai,GS3D_Sampled_Sun_Importance,0.270525
+bonsai,GS3D_Sampled_Sun_Center,0.269028
